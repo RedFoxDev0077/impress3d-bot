@@ -1,7 +1,7 @@
 {
   "name": "impress3d-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp Cloud API AI assistant for Impress3D (3D printing) - Portugal & Brasil",
+  "version": "2.0.0",
+  "description": "WhatsApp AI assistant + admin dashboard for Impress3D (3D printing) - Evolution API / Meta - Portugal & Brasil",
   "type": "module",
   "main": "server.js",
   "scripts": {

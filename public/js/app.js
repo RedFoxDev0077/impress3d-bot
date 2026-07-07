@@ -1,0 +1,372 @@
+/* ============ Impress3D dashboard (vanilla SPA) ============ */
+const $ = (s, r = document) => r.querySelector(s);
+const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
+const TOKEN_KEY = "i3d_token";
+let TOKEN = localStorage.getItem(TOKEN_KEY) || "";
+
+/* ---- Lucide-style inline icons ---- */
+const P = {
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
+  qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21v.01M21 21v.01M17.5 17.5h.01M21 17.5h.01"/>',
+  chat: '<path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6a8.5 8.5 0 0 1-.9-3.9 8.38 8.38 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10.51 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  spark: '<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/>',
+  activity: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+  search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/>',
+  power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
+  send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  bot: '<rect x="3" y="8" width="18" height="12" rx="3"/><path d="M12 8V4M8 3h8"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>',
+  menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.4-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+};
+const ico = (name, cls = "icon") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
+
+/* ---- helpers ---- */
+async function api(pathname, opts = {}) {
+  const res = await fetch(pathname, {
+    ...opts,
+    headers: { "content-type": "application/json", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}), ...(opts.headers || {}) },
+  });
+  if (res.status === 401) { logout(); throw new Error("unauthorized"); }
+  const ct = res.headers.get("content-type") || "";
+  const data = ct.includes("json") ? await res.json() : await res.text();
+  if (!res.ok) throw Object.assign(new Error(data.error || "erro"), { data });
+  return data;
+}
+function toast(msg) {
+  let t = $(".toast"); if (!t) { t = el("div", "toast"); document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+const initials = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+const avatarColor = (s) => { let h = 0; for (const c of s || "x") h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 62% 52%)`; };
+function timeAgo(ts) {
+  if (!ts) return "";
+  const d = (Date.now() - new Date(ts)) / 1000;
+  if (d < 60) return "agora"; if (d < 3600) return `${Math.floor(d / 60)} min`;
+  if (d < 86400) return `${Math.floor(d / 3600)} h`; return `${Math.floor(d / 86400)} d`;
+}
+const fmtTime = (ts) => (ts ? new Date(ts).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : "");
+function logout() { TOKEN = ""; localStorage.removeItem(TOKEN_KEY); location.hash = ""; renderLogin(); }
+
+/* ---- theme ---- */
+function initTheme() { const t = localStorage.getItem("i3d_theme") || "light"; document.documentElement.dataset.theme = t; }
+function toggleTheme() { const n = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n; localStorage.setItem("i3d_theme", n); const b = $("#themeBtn"); if (b) b.innerHTML = ico(n === "dark" ? "sun" : "moon"); }
+
+/* ================= LOGIN ================= */
+function renderLogin() {
+  document.body.innerHTML = "";
+  const wrap = el("div", "login-wrap");
+  wrap.innerHTML = `
+    <form class="login-card" id="loginForm">
+      <div class="login-logo">${ico("chat", "icon")}</div>
+      <h1>Impress3D</h1>
+      <p>Painel de Atendimento · WhatsApp IA</p>
+      <div class="field"><label>Senha de acesso</label>
+        <input class="input" type="password" id="pw" placeholder="••••••••" autocomplete="current-password" autofocus /></div>
+      <button class="btn btn-primary block" type="submit">Entrar</button>
+    </form>`;
+  document.body.appendChild(wrap);
+  $("#loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = e.submitter; btn.disabled = true; btn.textContent = "A entrar…";
+    try {
+      const { token } = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#pw").value }) });
+      TOKEN = token; localStorage.setItem(TOKEN_KEY, token); location.hash = "#/"; renderApp();
+    } catch (err) { toast(err.data?.error || "Senha incorreta"); btn.disabled = false; btn.textContent = "Entrar"; }
+  });
+}
+
+/* ================= APP SHELL ================= */
+const NAV = [
+  { id: "", label: "Dashboard", icon: "grid" },
+  { id: "conexao", label: "Conexão", icon: "qr" },
+  { id: "conversas", label: "Conversas", icon: "chat" },
+  { id: "config", label: "Configurações", icon: "settings" },
+];
+function renderApp() {
+  initTheme();
+  document.body.innerHTML = "";
+  const shell = el("div", "shell");
+  shell.innerHTML = `
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-badge">${ico("chat")}</div>
+        <div><div class="brand-name">Impress3D</div><div class="brand-sub">Atendimento IA</div></div>
+      </div>
+      <div class="nav-label">Menu</div>
+      <nav id="nav"></nav>
+      <div class="nav-spacer"></div>
+      <a class="nav-item" id="logoutBtn">${ico("logout")} Sair</a>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" id="menuBtn">${ico("menu")}</button>
+        <div><h2 id="pageTitle">Dashboard</h2><div class="sub" id="pageSub"></div></div>
+        <div class="top-right">
+          <button class="icon-btn" id="themeBtn">${ico(document.documentElement.dataset.theme === "dark" ? "sun" : "moon")}</button>
+          <span class="badge" id="connBadge"><span class="dot"></span> …</span>
+        </div>
+      </header>
+      <section class="content" id="view"></section>
+    </main>`;
+  document.body.appendChild(shell);
+  const nav = $("#nav");
+  NAV.forEach((n) => { const a = el("a", "nav-item", `${ico(n.icon)} ${n.label}`); a.dataset.id = n.id; a.href = `#/${n.id}`; nav.appendChild(a); });
+  $("#logoutBtn").addEventListener("click", logout);
+  $("#themeBtn").addEventListener("click", toggleTheme);
+  $("#menuBtn").addEventListener("click", () => { $("#sidebar").classList.toggle("open"); $("#scrim").classList.toggle("show"); });
+  $("#scrim").addEventListener("click", () => { $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show"); });
+  window.addEventListener("hashchange", route);
+  refreshConnBadge();
+  route();
+}
+
+async function refreshConnBadge() {
+  const b = $("#connBadge"); if (!b) return;
+  try {
+    const c = await api("/api/connection");
+    const map = { open: ["ok live", "Conectado"], connecting: ["warn", "A ligar…"], close: ["off", "Desconectado"], not_created: ["off", "Não configurado"] };
+    const [cls, txt] = map[c.state] || ["off", c.state];
+    b.className = `badge ${cls}`; b.innerHTML = `<span class="dot"></span> WhatsApp: ${txt}`;
+  } catch { b.className = "badge off"; b.innerHTML = `<span class="dot"></span> WhatsApp: —`; }
+}
+
+/* ================= ROUTER ================= */
+const TITLES = { "": ["Dashboard", "Visão geral do atendimento"], conexao: ["Conexão", "Ligar o WhatsApp por QR Code"], conversas: ["Conversas", "Histórico de mensagens"], config: ["Configurações", "Definições do assistente"] };
+function route() {
+  if (!TOKEN) return renderLogin();
+  const id = (location.hash.replace(/^#\/?/, "") || "").split("/")[0];
+  const [title, sub] = TITLES[id] || TITLES[""];
+  $("#pageTitle").textContent = title; $("#pageSub").textContent = sub;
+  document.querySelectorAll(".nav-item[data-id]").forEach((a) => a.classList.toggle("active", a.dataset.id === id));
+  $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show");
+  const v = $("#view"); v.innerHTML = `<div class="empty-state">${ico("refresh", "icon spin")}<div style="margin-top:8px">A carregar…</div></div>`;
+  ({ "": pageDashboard, conexao: pageConexao, conversas: pageConversas, config: pageConfig }[id] || pageDashboard)(v);
+}
+
+/* ================= DASHBOARD ================= */
+function kpi(tone, icon, val, label, trend) {
+  return `<div class="kpi"><div class="kpi-ic tone-${tone}">${ico(icon)}</div>
+    <div><div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div></div>
+    ${trend ? `<div class="kpi-trend ${trend.cls}">${trend.txt}</div>` : ""}</div>`;
+}
+function lineChart(labels, series) {
+  const w = 560, h = 200, pad = 26, max = Math.max(1, ...series);
+  const step = (w - pad * 2) / Math.max(1, series.length - 1);
+  const pts = series.map((v, i) => [pad + i * step, h - pad - (v / max) * (h - pad * 2)]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  const area = `${line} L ${pts[pts.length - 1][0].toFixed(1)} ${h - pad} L ${pad} ${h - pad} Z`;
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((g) => `<line x1="${pad}" x2="${w - pad}" y1="${(pad + g * (h - pad * 2)).toFixed(1)}" y2="${(pad + g * (h - pad * 2)).toFixed(1)}" stroke="var(--border)" />`).join("");
+  const dots = pts.map((p) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="var(--brand)" stroke="var(--surface)" stroke-width="2"/>`).join("");
+  const lbls = labels.map((l, i) => `<text x="${pad + i * step}" y="${h - 6}" text-anchor="middle" font-size="10" fill="var(--muted-2)">${l}</text>`).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet">
+    <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--brand)" stop-opacity="0.28"/><stop offset="1" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>
+    ${grid}<path d="${area}" fill="url(#ag)"/><path d="${line}" fill="none" stroke="var(--brand)" stroke-width="2.5"/>${dots}${lbls}</svg>`;
+}
+function donut(a, b) {
+  const total = Math.max(1, a + b), r = 52, c = 2 * Math.PI * r, seg = (a / total) * c;
+  return `<svg width="130" height="130" viewBox="0 0 130 130"><g transform="translate(65,65)">
+    <circle r="${r}" fill="none" stroke="var(--accent-soft)" stroke-width="16"/>
+    <circle r="${r}" fill="none" stroke="var(--brand)" stroke-width="16" stroke-linecap="round"
+      stroke-dasharray="${seg.toFixed(1)} ${(c - seg).toFixed(1)}" transform="rotate(-90)"/></g></svg>`;
+}
+async function pageDashboard(v) {
+  try {
+    const [s, chats, conn] = await Promise.all([api("/api/stats"), api("/api/chats"), api("/api/connection").catch(() => ({ state: "?" }))]);
+    const health = conn.state === "open" ? 99 : conn.state === "connecting" ? 60 : 0;
+    const logs = chats.slice(0, 6).map((c) => `
+      <div class="log-row">
+        <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
+        <div style="min-width:0"><div class="who">${c.name || c.number}</div><div class="msg">${(c.lastRole === "assistant" ? "🤖 " : "") + (c.lastMessage || "—")}</div></div>
+        <div class="time">${ico("clock", "icon icon-sm")} ${timeAgo(c.lastTs)}</div>
+      </div>`).join("") || `<div class="empty-state">${ico("chat")}<div>Ainda sem conversas.</div></div>`;
+    v.innerHTML = `
+      <div class="kpi-grid">
+        ${kpi("green", "chat", s.totalQueries, "Mensagens recebidas", { cls: "trend-up", txt: "IA ativa" })}
+        ${kpi("indigo", "users", s.totalUsers, "Clientes atendidos", { cls: "trend-flat", txt: `${s.activeToday} hoje` })}
+        ${kpi("amber", "spark", s.successRate + "%", "Taxa de resposta", { cls: "trend-up", txt: "respostas/pedido" })}
+        ${kpi("sky", "heart", health + "%", "Saúde do sistema", { cls: health ? "trend-up" : "trend-flat", txt: conn.state === "open" ? "online" : "verificar" })}
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div>${ico("activity")}</div><div><h3>Mensagens por mês</h3><div class="sub">Últimos 12 meses</div></div>
+            <div style="margin-left:auto" class="badge ok"><span class="dot"></span> ${s.totalQueries} total</div></div>
+          ${lineChart(s.chart.labels, s.chart.series)}
+        </div>
+        <div class="card">
+          <div class="card-head"><div>${ico("users")}</div><h3>Clientes</h3></div>
+          <div class="donut-wrap"><div style="position:relative">${donut(s.newUsers, s.returning)}
+            <div class="donut-center" style="position:absolute;inset:0;display:grid;place-items:center"><div><div class="big">${s.totalUsers}</div><div class="small">total</div></div></div></div>
+            <div class="stack">
+              <div class="legend-item"><span class="legend-swatch" style="background:var(--brand)"></span> Novos (30d): <b style="margin-left:4px">${s.newUsers}</b></div>
+              <div class="legend-item"><span class="legend-swatch" style="background:var(--accent-soft);border:1px solid var(--accent)"></span> Recorrentes: <b style="margin-left:4px">${s.returning}</b></div>
+            </div></div>
+        </div>
+      </div>
+      <div class="grid-2b">
+        <div class="card">
+          <div class="card-head"><div>${ico("heart")}</div><h3>Estado</h3></div>
+          <div class="kv"><span class="k">WhatsApp</span><span class="v">${conn.state === "open" ? "🟢 Conectado" : conn.state === "connecting" ? "🟠 A ligar" : "🔴 Offline"}</span></div>
+          <div class="kv"><span class="k">Assistente IA</span><span class="v">🟢 Ativo</span></div>
+          <div class="kv"><span class="k">Respostas enviadas</span><span class="v">${s.totalReplies}</span></div>
+          <div class="kv"><span class="k">Ativos hoje</span><span class="v">${s.activeToday}</span></div>
+          ${conn.state !== "open" ? `<a href="#/conexao" class="btn btn-primary block" style="margin-top:14px">${ico("qr", "icon icon-sm")} Ligar WhatsApp</a>` : ""}
+        </div>
+        <div class="card">
+          <div class="card-head"><div>${ico("chat")}</div><h3>Conversas recentes</h3>
+            <a href="#/conversas" class="btn btn-ghost" style="margin-left:auto">Ver todas</a></div>
+          ${logs}
+        </div>
+      </div>`;
+  } catch (e) { v.innerHTML = `<div class="empty-state">${ico("activity")}<div>Não foi possível carregar os dados.</div></div>`; }
+}
+
+/* ================= CONEXÃO / QR ================= */
+let qrPoll = null;
+async function pageConexao(v) {
+  v.innerHTML = `
+    <div class="qr-grid">
+      <div class="card qr-stage">
+        <div class="between" style="width:100%"><div class="card-head" style="margin:0"><div>${ico("qr")}</div><h3>Ligar o WhatsApp</h3></div>
+          <span class="badge" id="qrState"><span class="dot"></span> …</span></div>
+        <div class="qr-frame empty" id="qrFrame" style="margin-top:18px">${ico("qr", "icon")}<div style="position:absolute;bottom:14px;font-size:12px;color:var(--muted-2)">Gere o QR para começar</div></div>
+        <div class="row" style="margin-top:20px">
+          <button class="btn btn-primary" id="genBtn">${ico("qr", "icon icon-sm")} Gerar QR Code</button>
+          <button class="btn" id="refreshBtn">${ico("refresh", "icon icon-sm")} Atualizar</button>
+          <button class="btn btn-danger" id="logoutWa">${ico("power", "icon icon-sm")} Desligar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div>${ico("phone")}</div><h3>Como ligar</h3></div>
+        <div class="steps">
+          <div class="step"><div class="n"></div><div class="t">Abra o <b>WhatsApp</b> no telemóvel do número da empresa</div></div>
+          <div class="step"><div class="n"></div><div class="t">Toque em <b>Definições → Aparelhos ligados</b><small>No Android: menu ⋮ → Aparelhos ligados</small></div></div>
+          <div class="step"><div class="n"></div><div class="t">Toque em <b>Ligar um aparelho</b></div></div>
+          <div class="step"><div class="n"></div><div class="t">Aponte a câmara para o <b>QR Code</b> ao lado</div></div>
+          <div class="step"><div class="n"></div><div class="t">Pronto! A IA começa a responder automaticamente ✅</div></div>
+        </div>
+        <div class="divider"></div>
+        <div class="muted" style="font-size:12.5px">${ico("link", "icon icon-sm")} O QR expira em ~40s. Se falhar, toque em <b>Atualizar</b>.</div>
+      </div>
+    </div>`;
+  const frame = $("#qrFrame"), stateB = $("#qrState");
+  const setState = (st) => {
+    const map = { open: ["ok live", "Conectado ✅"], connecting: ["warn", "Aguardando leitura…"], close: ["off", "Desconectado"], not_created: ["off", "Não configurado"] };
+    const [cls, txt] = map[st] || ["off", st]; stateB.className = `badge ${cls}`; stateB.innerHTML = `<span class="dot"></span> ${txt}`;
+  };
+  async function poll() {
+    try { const c = await api("/api/connection"); setState(c.state); refreshConnBadge();
+      if (c.state === "open") { clearInterval(qrPoll); qrPoll = null; frame.className = "qr-frame"; frame.innerHTML = `<div style="text-align:center;color:var(--brand-700)">${ico("check", "icon")}<div style="margin-top:8px;font-weight:600">Ligado!</div></div>`; toast("WhatsApp conectado 🎉"); }
+    } catch {}
+  }
+  async function generate() {
+    const btn = $("#genBtn"); btn.disabled = true; btn.innerHTML = `${ico("refresh", "icon icon-sm spin")} A gerar…`;
+    frame.className = "qr-frame"; frame.innerHTML = `<div class="qr-skeleton"></div>`;
+    try {
+      const { qr, state } = await api("/api/connection/connect", { method: "POST" });
+      if (qr) { frame.innerHTML = `<img src="${qr}" alt="QR Code WhatsApp"/>`; setState("connecting"); }
+      else if (state === "open") { setState("open"); poll(); }
+      else { frame.className = "qr-frame empty"; frame.innerHTML = "Sem QR — tente atualizar"; }
+      if (!qrPoll) qrPoll = setInterval(poll, 3000);
+    } catch (e) { frame.className = "qr-frame empty"; frame.innerHTML = `${ico("power", "icon")}<div style="margin-top:8px;font-size:12px">Serviço indisponível</div>`; toast(e.data?.error || "Erro ao gerar QR"); }
+    finally { btn.disabled = false; btn.innerHTML = `${ico("qr", "icon icon-sm")} Gerar QR Code`; }
+  }
+  $("#genBtn").addEventListener("click", generate);
+  $("#refreshBtn").addEventListener("click", generate);
+  $("#logoutWa").addEventListener("click", async () => { try { await api("/api/connection/logout", { method: "POST" }); toast("WhatsApp desligado"); setState("close"); refreshConnBadge(); } catch { toast("Erro"); } });
+  poll(); if (!qrPoll) qrPoll = setInterval(poll, 4000);
+}
+window.addEventListener("hashchange", () => { if (!location.hash.includes("conexao") && qrPoll) { clearInterval(qrPoll); qrPoll = null; } });
+
+/* ================= CONVERSAS ================= */
+async function pageConversas(v) {
+  let chats = [];
+  try { chats = await api("/api/chats"); } catch { }
+  v.innerHTML = `
+    <div class="chat-layout">
+      <div class="card chat-list" id="chatList" style="padding:8px"></div>
+      <div class="card chat-panel" id="chatPanel"><div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div></div>
+    </div>`;
+  const list = $("#chatList");
+  if (!chats.length) { list.innerHTML = `<div class="empty-state">${ico("chat")}<div>Sem conversas ainda.</div><div class="muted" style="font-size:12px;margin-top:6px">Assim que um cliente escrever, aparece aqui.</div></div>`; return; }
+  list.innerHTML = chats.map((c) => `
+    <div class="item" data-id="${encodeURIComponent(c.id)}">
+      <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
+      <div style="min-width:0;flex:1"><div class="who">${c.name || c.number}</div><div class="prev">${c.lastMessage || "—"}</div></div>
+      <div style="text-align:right"><div class="muted" style="font-size:11px">${timeAgo(c.lastTs)}</div>${c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : ""}</div>
+    </div>`).join("");
+  list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", async () => {
+    list.querySelectorAll(".item").forEach((x) => x.classList.remove("active")); it.classList.add("active");
+    await openChat(decodeURIComponent(it.dataset.id));
+  }));
+  list.querySelector(".item")?.click();
+}
+async function openChat(id) {
+  const panel = $("#chatPanel");
+  panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("refresh", "icon spin")}</div>`;
+  try {
+    const c = await api(`/api/chats/${encodeURIComponent(id)}`);
+    const bubbles = c.messages.map((m) => `<div class="bubble ${m.role}">${escapeHtml(m.content)}<span class="b-time">${fmtTime(m.ts)}</span></div>`).join("");
+    panel.innerHTML = `
+      <div class="chat-panel-head">
+        <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
+        <div><div style="font-weight:600">${c.name || c.number}</div><div class="muted" style="font-size:12px">${c.number}${c.handoff ? " · encaminhado a humano" : ""}</div></div>
+        <span class="badge" style="margin-left:auto">${c.messages.length} mensagens</span>
+      </div>
+      <div class="chat-thread">${bubbles || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>`;
+    const th = panel.querySelector(".chat-thread"); if (th) th.scrollTop = th.scrollHeight;
+  } catch { panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Erro ao abrir conversa</div></div>`; }
+}
+const escapeHtml = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ================= CONFIGURAÇÕES ================= */
+async function pageConfig(v) {
+  let conn = { state: "?", instance: "-", provider: "-" };
+  try { conn = await api("/api/connection"); } catch { }
+  v.innerHTML = `
+    <div class="settings-grid">
+      <div class="card">
+        <div class="card-head"><div>${ico("bot")}</div><h3>Assistente</h3></div>
+        <div class="kv"><span class="k">Estado da IA</span><span class="v">🟢 Ativo</span></div>
+        <div class="kv"><span class="k">Modelo</span><span class="v">Claude (Anthropic)</span></div>
+        <div class="kv"><span class="k">Idioma</span><span class="v">PT-PT / PT-BR (automático)</span></div>
+        <div class="kv"><span class="k">Encaminhar a humano</span><span class="v">palavra “atendente”</span></div>
+        <div class="divider"></div>
+        <div class="muted" style="font-size:12.5px">A base de conhecimento (serviços, materiais, preços) é definida no prompt do sistema. Envie o material e afinamos as respostas.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div>${ico("link")}</div><h3>Ligação WhatsApp</h3></div>
+        <div class="kv"><span class="k">Fornecedor</span><span class="v">${conn.provider || "Evolution API"}</span></div>
+        <div class="kv"><span class="k">Instância</span><span class="v">${conn.instance || "-"}</span></div>
+        <div class="kv"><span class="k">Estado</span><span class="v">${conn.state === "open" ? "🟢 Conectado" : "🔴 Desconectado"}</span></div>
+        <a href="#/conexao" class="btn btn-primary block" style="margin-top:14px">${ico("qr", "icon icon-sm")} Gerir ligação</a>
+      </div>
+      <div class="card">
+        <div class="card-head"><div>${ico("settings")}</div><h3>Conta</h3></div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px">Termine a sessão do painel administrativo com segurança.</div>
+        <button class="btn btn-danger block" id="cfgLogout">${ico("logout", "icon icon-sm")} Terminar sessão</button>
+      </div>
+      <div class="card">
+        <div class="card-head"><div>${ico("heart")}</div><h3>Sobre</h3></div>
+        <div class="kv"><span class="k">Projeto</span><span class="v">Impress3D · Atendimento IA</span></div>
+        <div class="kv"><span class="k">Versão</span><span class="v">Milestone 1</span></div>
+        <div class="kv"><span class="k">Domínio</span><span class="v">api.impress3d.com.br</span></div>
+      </div>
+    </div>`;
+  $("#cfgLogout").addEventListener("click", logout);
+}
+
+/* ================= BOOT ================= */
+initTheme();
+if (TOKEN) renderApp(); else renderLogin();
