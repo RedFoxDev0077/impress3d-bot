@@ -97,11 +97,20 @@ async function handleInbound({ jid, name, text, hasText, id }) {
   await appendMessage(jid, "user", text, name);
   const history = await getHistory(jid);
   let reply;
-  try {
-    reply = await generateReply(history);
-  } catch (e) {
-    console.error("[ai] error:", e.response?.data || e.message);
-    reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
+  const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
+  if (!hasAIKey) {
+    // Milestone 1: works with no paid API key — simple auto-reply. Upgrades to
+    // full Claude replies automatically once ANTHROPIC_API_KEY is set.
+    reply =
+      process.env.SIMPLE_REPLY ||
+      "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
+  } else {
+    try {
+      reply = await generateReply(history);
+    } catch (e) {
+      console.error("[ai] error:", e.response?.data || e.message);
+      reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
+    }
   }
   await appendMessage(jid, "assistant", reply);
   await sendText(jid, reply);
