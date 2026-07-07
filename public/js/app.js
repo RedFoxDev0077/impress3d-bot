@@ -261,13 +261,19 @@ async function pageConexao(v) {
       </div>
     </div>`;
   const frame = $("#qrFrame"), stateB = $("#qrState");
+  let lastQrAt = 0;
   const setState = (st) => {
     const map = { open: ["ok live", "Conectado ✅"], connecting: ["warn", "Aguardando leitura…"], close: ["off", "Desconectado"], not_created: ["off", "Não configurado"] };
     const [cls, txt] = map[st] || ["off", st]; stateB.className = `badge ${cls}`; stateB.innerHTML = `<span class="dot"></span> ${txt}`;
   };
   async function poll() {
-    try { const c = await api("/api/connection"); setState(c.state); refreshConnBadge();
-      if (c.state === "open") { clearInterval(qrPoll); qrPoll = null; frame.className = "qr-frame"; frame.innerHTML = `<div style="text-align:center;color:var(--brand-700)">${ico("check", "icon")}<div style="margin-top:8px;font-weight:600">Ligado!</div></div>`; toast("WhatsApp conectado 🎉"); }
+    try {
+      const c = await api("/api/connection"); setState(c.state); refreshConnBadge();
+      if (c.state === "open") { clearInterval(qrPoll); qrPoll = null; frame.className = "qr-frame"; frame.innerHTML = `<div style="text-align:center;color:var(--brand-700)">${ico("check", "icon")}<div style="margin-top:8px;font-weight:600">Ligado!</div></div>`; toast("WhatsApp conectado 🎉"); return; }
+      // Keep the displayed QR fresh — WhatsApp rotates it every ~20s, so a static QR goes stale and fails.
+      if (c.state === "connecting" && frame.querySelector("img") && Date.now() - lastQrAt > 18000) {
+        try { const r = await api("/api/connection/connect", { method: "POST" }); if (r.qr) { frame.querySelector("img").src = r.qr; lastQrAt = Date.now(); } } catch {}
+      }
     } catch {}
   }
   async function generate() {
@@ -275,7 +281,7 @@ async function pageConexao(v) {
     frame.className = "qr-frame"; frame.innerHTML = `<div class="qr-skeleton"></div>`;
     try {
       const { qr, state } = await api("/api/connection/connect", { method: "POST" });
-      if (qr) { frame.innerHTML = `<img src="${qr}" alt="QR Code WhatsApp"/>`; setState("connecting"); }
+      if (qr) { frame.innerHTML = `<img src="${qr}" alt="QR Code WhatsApp"/>`; lastQrAt = Date.now(); setState("connecting"); }
       else if (state === "open") { setState("open"); poll(); }
       else { frame.className = "qr-frame empty"; frame.innerHTML = "Sem QR — tente atualizar"; }
       if (!qrPoll) qrPoll = setInterval(poll, 3000);
