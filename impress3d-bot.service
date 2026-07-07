@@ -1,0 +1,18 @@
+[Unit]
+Description=impress3d-bot (WhatsApp AI assistant)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/impress3d-bot
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=3
+User=root
+Environment=NODE_ENV=production
+# logs go to journald: journalctl -u impress3d-bot -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

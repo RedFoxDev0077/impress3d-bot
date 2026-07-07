@@ -1,0 +1,15 @@
+{
+  "name": "impress3d-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Cloud API AI assistant for Impress3D (3D printing) - Portugal & Brasil",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
