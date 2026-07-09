@@ -38,12 +38,12 @@ export async function getHistory(id) {
   return conv.messages.slice(-HISTORY_TURNS).map(({ role, content }) => ({ role, content }));
 }
 
-export async function appendMessage(id, role, content, name) {
+export async function appendMessage(id, role, content, name, extra = {}) {
   const db = await load();
   if (!db[id]) db[id] = { messages: [], meta: {} };
   if (name && !db[id].meta.name) db[id].meta.name = name;
   db[id].meta.updatedAt = new Date().toISOString();
-  db[id].messages.push({ role, content, ts: new Date().toISOString() });
+  db[id].messages.push({ role, content, ts: new Date().toISOString(), ...extra });
   if (db[id].messages.length > 200) db[id].messages = db[id].messages.slice(-200);
   await persist();
 }

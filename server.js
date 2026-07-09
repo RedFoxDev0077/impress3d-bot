@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { promises as fsp } from "node:fs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,19 @@ const HANDOFF_KEYWORD = (process.env.HUMAN_HANDOFF_KEYWORD || "atendente").toLow
 const DASH_PASSWORD = process.env.DASHBOARD_PASSWORD || "impress3d";
 const DASH_SECRET = process.env.DASHBOARD_SECRET || VERIFY_TOKEN || "change-me-secret";
 const PUBLIC_URL = process.env.PUBLIC_URL || "https://api.impress3d.com.br";
+const MEDIA_DIR = path.join(process.cwd(), "data", "media");
+
+const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "video/mp4": "mp4", "application/pdf": "pdf" };
+const extFromMime = (mime = "") => MIME_EXT[String(mime).split(";")[0].trim()] || "";
+function mediaAck(type) {
+  return {
+    image: "Recebi a sua imagem! 📷 Vou já analisar. Se puder, descreva em texto o que precisa (peça, tamanho, material) para adiantar o orçamento. 🙂",
+    audio: "Recebi o seu áudio! 🎤 Um colega vai ouvir e responder-lhe em breve. Se preferir, pode também escrever a sua questão.",
+    video: "Recebi o seu vídeo! 🎬 Vou analisar e responder-lhe em breve.",
+    document: "Recebi o seu documento! 📄 Vou verificar e responder-lhe em breve.",
+    sticker: "😄 Recebido! Em que posso ajudar com a sua impressão 3D?",
+  }[type] || "Recebi a sua mensagem! Respondo-lhe já de seguida. 🙂";
+}
 
 app.use(express.json({ limit: "2mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
 
@@ -80,7 +94,30 @@ app.post("/api/connection/logout", requireAuth, async (_req, res) => {
 });
 
 // ---------- WhatsApp: Evolution webhook ----------
-async function handleInbound({ jid, name, text, hasText, id }) {
+async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext }) {
+  // ---- Media (image / audio / video / document / sticker) ----
+  if (mediaType) {
+    const label = { image: "📷 Imagem", audio: "🎤 Áudio", video: "🎬 Vídeo", sticker: "🃏 Figurinha", document: "📄 Documento" }[mediaType] || "📎 Mídia";
+    let mediaFile = null;
+    try {
+      const md = await evolution.getMediaBase64(raw);
+      if (md?.base64) {
+        const e = extFromMime(md.mimetype) || ext || "bin";
+        mediaFile = `${Date.now()}_${String(id).replace(/[^\w]/g, "").slice(0, 24)}.${e}`;
+        await fsp.mkdir(MEDIA_DIR, { recursive: true });
+        await fsp.writeFile(path.join(MEDIA_DIR, mediaFile), Buffer.from(md.base64, "base64"));
+      }
+    } catch (e) {
+      console.warn("[media] fetch failed:", e.response?.data || e.message);
+    }
+    console.log(`[msg] ${jid} (${name}): <${mediaType}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
+    await appendMessage(jid, "user", hasText ? text : label, name, { type: mediaType, media: mediaFile });
+    const reply = mediaAck(mediaType);
+    await appendMessage(jid, "assistant", reply);
+    await sendText(jid, reply);
+    return;
+  }
+
   if (!hasText) {
     await sendText(jid, "De momento consigo responder a mensagens de texto. Pode escrever a sua questão? 🙂");
     return;
@@ -146,6 +183,21 @@ app.post("/webhook", async (req, res) => {
   } catch (e) {
     console.error("[webhook meta] error:", e);
   }
+});
+
+// ---------- Media (customer images/audio), token-protected ----------
+app.get("/media/:file", (req, res) => {
+  try {
+    if (!req.query.t || !crypto.timingSafeEqual(Buffer.from(String(req.query.t)), Buffer.from(issueToken()))) {
+      return res.sendStatus(401);
+    }
+  } catch {
+    return res.sendStatus(401);
+  }
+  const file = path.basename(String(req.params.file));
+  res.sendFile(path.join(MEDIA_DIR, file), (err) => {
+    if (err && !res.headersSent) res.sendStatus(404);
+  });
 });
 
 // ---------- Static dashboard ----------

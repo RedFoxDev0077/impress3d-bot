@@ -323,7 +323,7 @@ async function openChat(id) {
   panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("refresh", "icon spin")}</div>`;
   try {
     const c = await api(`/api/chats/${encodeURIComponent(id)}`);
-    const bubbles = c.messages.map((m) => `<div class="bubble ${m.role}">${escapeHtml(m.content)}<span class="b-time">${fmtTime(m.ts)}</span></div>`).join("");
+    const bubbles = c.messages.map((m) => `<div class="bubble ${m.role}">${mediaHtml(m)}${m.content ? `<span>${escapeHtml(m.content)}</span>` : ""}<span class="b-time">${fmtTime(m.ts)}</span></div>`).join("");
     panel.innerHTML = `
       <div class="chat-panel-head">
         <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
@@ -335,6 +335,15 @@ async function openChat(id) {
   } catch { panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Erro ao abrir conversa</div></div>`; }
 }
 const escapeHtml = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function mediaHtml(m) {
+  if (!m.type || !m.media) return "";
+  const src = `/media/${encodeURIComponent(m.media)}?t=${encodeURIComponent(TOKEN)}`;
+  if (m.type === "image" || m.type === "sticker") return `<a href="${src}" target="_blank" rel="noopener"><img class="bubble-media" src="${src}" alt="imagem" loading="lazy"/></a>`;
+  if (m.type === "audio") return `<audio class="bubble-audio" controls preload="none" src="${src}"></audio>`;
+  if (m.type === "video") return `<video class="bubble-media" controls preload="none" src="${src}"></video>`;
+  if (m.type === "document") return `<a class="bubble-doc" href="${src}" target="_blank" rel="noopener">📄 Abrir documento</a>`;
+  return "";
+}
 
 /* ================= CONFIGURAÇÕES ================= */
 async function pageConfig(v) {

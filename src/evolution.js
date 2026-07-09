@@ -107,6 +107,12 @@ export async function sendText(to, body) {
   return res.data;
 }
 
+// Fetch the decrypted media (base64) for a media message. Returns {base64, mimetype, ...}.
+export async function getMediaBase64(rawData) {
+  const res = await api.post(`/chat/getBase64FromMediaMessage/${INSTANCE}`, { message: rawData });
+  return res.data;
+}
+
 // Parse an incoming Evolution webhook body into a normalized message (or null).
 export function parseIncoming(body) {
   const event = body?.event || body?.type;
@@ -123,13 +129,27 @@ export function parseIncoming(body) {
     m.extendedTextMessage?.text ||
     m.imageMessage?.caption ||
     m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
     "";
+
+  // Media detection (image / audio / video / sticker / document).
+  let mediaType = null, mime = "", ext = "";
+  if (m.imageMessage) { mediaType = "image"; mime = m.imageMessage.mimetype || "image/jpeg"; ext = "jpg"; }
+  else if (m.audioMessage) { mediaType = "audio"; mime = m.audioMessage.mimetype || "audio/ogg"; ext = "ogg"; }
+  else if (m.videoMessage) { mediaType = "video"; mime = m.videoMessage.mimetype || "video/mp4"; ext = "mp4"; }
+  else if (m.stickerMessage) { mediaType = "sticker"; mime = "image/webp"; ext = "webp"; }
+  else if (m.documentMessage) { mediaType = "document"; mime = m.documentMessage.mimetype || "application/octet-stream"; ext = (m.documentMessage.fileName || "file").split(".").pop() || "bin"; }
+
   return {
     jid,
     number: jidToNumber(jid),
     name: data.pushName || "",
     text: (text || "").trim(),
     hasText: Boolean((text || "").trim()),
+    mediaType,
+    mime,
+    ext,
+    raw: data,
     id: key.id || "",
   };
 }
