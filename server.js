@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  getConversation,
   getHistory,
   appendMessage,
   setMeta,
@@ -72,6 +73,29 @@ app.get("/api/chats/:id", requireAuth, async (req, res) =>
   res.json(await getMessages(decodeURIComponent(req.params.id)))
 );
 
+// Pause / resume the AI for one conversation (manual takeover).
+app.post("/api/chats/:id/pause", requireAuth, async (req, res) => {
+  const id = decodeURIComponent(req.params.id);
+  const paused = Boolean(req.body?.paused);
+  await setMeta(id, { paused });
+  res.json({ ok: true, paused });
+});
+
+// Send a manual message as the business (from the dashboard).
+app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
+  const id = decodeURIComponent(req.params.id);
+  const text = String(req.body?.text || "").trim();
+  if (!text) return res.status(400).json({ error: "texto vazio" });
+  try {
+    await sendText(id, text);
+    await appendMessage(id, "assistant", text, null, { agent: true });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[manual send]", e.response?.data || e.message);
+    res.status(502).json({ error: "falha ao enviar mensagem" });
+  }
+});
+
 app.get("/api/connection", requireAuth, async (_req, res) => {
   if (WA_PROVIDER !== "evolution") return res.json({ provider: "meta", state: "n/a" });
   const state = await evolution.connectionState();
@@ -95,6 +119,11 @@ app.post("/api/connection/logout", requireAuth, async (_req, res) => {
 
 // ---------- WhatsApp: Evolution webhook ----------
 async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext }) {
+  // If an agent paused the AI for this chat, we still record the message
+  // (so it shows in the dashboard) but do NOT auto-reply.
+  const conv = await getConversation(jid);
+  const paused = Boolean(conv.meta?.paused);
+
   // ---- Media (image / audio / video / document / sticker) ----
   if (mediaType) {
     const label = { image: "📷 Imagem", audio: "🎤 Áudio", video: "🎬 Vídeo", sticker: "🃏 Figurinha", document: "📄 Documento" }[mediaType] || "📎 Mídia";
@@ -112,6 +141,7 @@ async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext
     }
     console.log(`[msg] ${jid} (${name}): <${mediaType}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
     await appendMessage(jid, "user", hasText ? text : label, name, { type: mediaType, media: mediaFile });
+    if (paused) return;
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
     await sendText(jid, reply);
@@ -119,19 +149,20 @@ async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext
   }
 
   if (!hasText) {
-    await sendText(jid, "De momento consigo responder a mensagens de texto. Pode escrever a sua questão? 🙂");
+    if (!paused) await sendText(jid, "De momento consigo responder a mensagens de texto. Pode escrever a sua questão? 🙂");
     return;
   }
-  console.log(`[msg] ${jid} (${name}): ${text}`);
+  console.log(`[msg] ${jid} (${name}): ${text}${paused ? " [IA pausada]" : ""}`);
+  await appendMessage(jid, "user", text, name);
 
   if (text.toLowerCase().includes(HANDOFF_KEYWORD)) {
-    await setMeta(jid, { handoff: true, handoffAt: new Date().toISOString() });
-    await appendMessage(jid, "user", text, name);
-    await sendText(jid, "Sem problema — vou encaminhar para um colega da equipa. Aguarde só um momento. 👍");
+    await setMeta(jid, { handoff: true, handoffAt: new Date().toISOString(), paused: true });
+    if (!paused) await sendText(jid, "Sem problema — vou encaminhar para um colega da equipa. Aguarde só um momento. 👍");
     return;
   }
 
-  await appendMessage(jid, "user", text, name);
+  if (paused) return; // manual takeover — an agent will reply from the dashboard
+
   const history = await getHistory(jid);
   let reply;
   const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;

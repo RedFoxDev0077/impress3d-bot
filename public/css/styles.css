@@ -251,6 +251,20 @@ svg { display: block; }
 .bubble-media { display: block; max-width: 240px; max-height: 300px; width: auto; border-radius: 10px; margin-bottom: 4px; cursor: pointer; }
 .bubble-audio { display: block; width: 240px; max-width: 100%; height: 40px; margin-bottom: 4px; }
 .bubble-doc { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-2); font-weight: 600; font-size: 12.5px; margin-bottom: 4px; }
+.media-missing { font-size: 12.5px; color: var(--muted-2); font-style: italic; }
+.who-tag { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; opacity: 0.55; margin-bottom: 3px; text-transform: uppercase; }
+.bubble.agent { background: linear-gradient(135deg, var(--amber-soft), color-mix(in srgb, var(--amber) 12%, var(--surface))); }
+
+/* ---------- Per-chat AI pause toggle ---------- */
+.pause-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; font-size: 12.5px; font-weight: 600; color: var(--muted); background: var(--surface-2); padding: 7px 13px; border-radius: 999px; border: 1px solid var(--border-2); white-space: nowrap; }
+.pause-toggle input { accent-color: var(--amber); width: 16px; height: 16px; cursor: pointer; }
+.pause-toggle:has(input:checked) { color: var(--amber); background: var(--amber-soft); border-color: transparent; }
+
+/* ---------- Manual reply composer ---------- */
+.chat-composer { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface); }
+.composer-input { flex: 1; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); font-size: 14px; outline: none; transition: border 0.15s, box-shadow 0.15s; }
+.composer-input:focus { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(37, 211, 102, 0.14); background: var(--surface); }
+.chat-composer .btn { padding: 0 18px; }
 
 /* ---------- Connection / QR ---------- */
 .qr-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }

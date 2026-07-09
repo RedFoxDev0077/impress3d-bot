@@ -296,47 +296,106 @@ async function pageConexao(v) {
 window.addEventListener("hashchange", () => { if (!location.hash.includes("conexao") && qrPoll) { clearInterval(qrPoll); qrPoll = null; } });
 
 /* ================= CONVERSAS ================= */
+let convPoll = null, convOpenId = null, convSig = "";
 async function pageConversas(v) {
-  let chats = [];
-  try { chats = await api("/api/chats"); } catch { }
   v.innerHTML = `
     <div class="chat-layout">
       <div class="card chat-list" id="chatList" style="padding:8px"></div>
       <div class="card chat-panel" id="chatPanel"><div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div></div>
     </div>`;
-  const list = $("#chatList");
-  if (!chats.length) { list.innerHTML = `<div class="empty-state">${ico("chat")}<div>Sem conversas ainda.</div><div class="muted" style="font-size:12px;margin-top:6px">Assim que um cliente escrever, aparece aqui.</div></div>`; return; }
-  list.innerHTML = chats.map((c) => `
-    <div class="item" data-id="${encodeURIComponent(c.id)}">
+  await loadList(true);
+  if (convPoll) clearInterval(convPoll);
+  convPoll = setInterval(pollConversas, 4000);
+}
+window.addEventListener("hashchange", () => { if (!location.hash.includes("conversas") && convPoll) { clearInterval(convPoll); convPoll = null; convOpenId = null; } });
+
+function chatItemHtml(c) {
+  const tag = c.paused ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">IA pausada</span>'
+    : c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : "";
+  return `<div class="item${c.id === convOpenId ? " active" : ""}" data-id="${encodeURIComponent(c.id)}">
       <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
-      <div style="min-width:0;flex:1"><div class="who">${c.name || c.number}</div><div class="prev">${c.lastMessage || "—"}</div></div>
-      <div style="text-align:right"><div class="muted" style="font-size:11px">${timeAgo(c.lastTs)}</div>${c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : ""}</div>
-    </div>`).join("");
-  list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", async () => {
-    list.querySelectorAll(".item").forEach((x) => x.classList.remove("active")); it.classList.add("active");
-    await openChat(decodeURIComponent(it.dataset.id));
-  }));
-  list.querySelector(".item")?.click();
+      <div style="min-width:0;flex:1"><div class="who">${escapeHtml(c.name || c.number)}</div><div class="prev">${(c.lastRole === "assistant" ? "🤖 " : "") + escapeHtml(c.lastMessage || "—")}</div></div>
+      <div style="text-align:right"><div class="muted" style="font-size:11px">${timeAgo(c.lastTs)}</div>${tag}</div>
+    </div>`;
+}
+async function loadList(autoOpen) {
+  let chats = [];
+  try { chats = await api("/api/chats"); } catch { return; }
+  const list = $("#chatList"); if (!list) return;
+  if (!chats.length) { list.innerHTML = `<div class="empty-state">${ico("chat")}<div>Sem conversas ainda.</div><div class="muted" style="font-size:12px;margin-top:6px">Assim que um cliente escrever, aparece aqui.</div></div>`; return; }
+  list.innerHTML = chats.map(chatItemHtml).join("");
+  list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", () => openChat(decodeURIComponent(it.dataset.id))));
+  if (autoOpen && !convOpenId) list.querySelector(".item")?.click();
+}
+function threadHtml(c) {
+  return c.messages.map((m) => {
+    const cls = m.agent ? "assistant agent" : m.role;
+    const tag = m.agent ? `<span class="who-tag">👤 atendente</span>` : (m.role === "assistant" ? `<span class="who-tag">🤖 IA</span>` : "");
+    return `<div class="bubble ${cls}">${tag}${mediaHtml(m)}${m.content ? `<span>${escapeHtml(m.content)}</span>` : ""}<span class="b-time">${fmtTime(m.ts)}</span></div>`;
+  }).join("");
 }
 async function openChat(id) {
+  convOpenId = id;
+  document.querySelectorAll("#chatList .item").forEach((x) => x.classList.toggle("active", decodeURIComponent(x.dataset.id) === id));
   const panel = $("#chatPanel");
   panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("refresh", "icon spin")}</div>`;
-  try {
-    const c = await api(`/api/chats/${encodeURIComponent(id)}`);
-    const bubbles = c.messages.map((m) => `<div class="bubble ${m.role}">${mediaHtml(m)}${m.content ? `<span>${escapeHtml(m.content)}</span>` : ""}<span class="b-time">${fmtTime(m.ts)}</span></div>`).join("");
-    panel.innerHTML = `
-      <div class="chat-panel-head">
-        <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
-        <div><div style="font-weight:600">${c.name || c.number}</div><div class="muted" style="font-size:12px">${c.number}${c.handoff ? " · encaminhado a humano" : ""}</div></div>
-        <span class="badge" style="margin-left:auto">${c.messages.length} mensagens</span>
-      </div>
-      <div class="chat-thread">${bubbles || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>`;
-    const th = panel.querySelector(".chat-thread"); if (th) th.scrollTop = th.scrollHeight;
-  } catch { panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Erro ao abrir conversa</div></div>`; }
+  let c;
+  try { c = await api(`/api/chats/${encodeURIComponent(id)}`); }
+  catch { panel.innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Erro ao abrir conversa</div></div>`; return; }
+  convSig = c.messages.length + "|" + (c.messages[c.messages.length - 1]?.ts || "");
+  panel.innerHTML = `
+    <div class="chat-panel-head">
+      <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
+      <div style="min-width:0"><div style="font-weight:600">${escapeHtml(c.name || c.number)}</div><div class="muted" style="font-size:12px">${c.number}</div></div>
+      <label class="pause-toggle" title="Pausar a IA nesta conversa para responder manualmente">
+        <input type="checkbox" id="pauseChk" ${c.paused ? "checked" : ""}/>
+        <span class="pause-label">${c.paused ? "IA pausada" : "IA ativa"}</span>
+      </label>
+    </div>
+    <div class="chat-thread" id="thread">${threadHtml(c) || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>
+    <form class="chat-composer" id="composer" autocomplete="off">
+      <input class="composer-input" id="composerInput" placeholder="Escreva uma resposta manual…" />
+      <button class="btn btn-primary" id="composerSend" type="submit" title="Enviar">${ico("send", "icon icon-sm")}</button>
+    </form>`;
+  const th = $("#thread"); if (th) th.scrollTop = th.scrollHeight;
+  $("#pauseChk").addEventListener("change", async (e) => {
+    const paused = e.target.checked;
+    $(".pause-label").textContent = paused ? "IA pausada" : "IA ativa";
+    try { await api(`/api/chats/${encodeURIComponent(id)}/pause`, { method: "POST", body: JSON.stringify({ paused }) }); toast(paused ? "IA pausada nesta conversa" : "IA reativada"); loadList(false); }
+    catch { toast("Erro ao alterar"); e.target.checked = !paused; }
+  });
+  $("#composer").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#composerInput"), txt = input.value.trim(); if (!txt) return;
+    const btn = $("#composerSend"); btn.disabled = true; input.disabled = true;
+    try {
+      await api(`/api/chats/${encodeURIComponent(id)}/send`, { method: "POST", body: JSON.stringify({ text: txt }) });
+      input.value = ""; await refreshThread(true); loadList(false);
+    } catch (err) { toast(err.data?.error || "Falha ao enviar"); }
+    finally { btn.disabled = false; input.disabled = false; input.focus(); }
+  });
+}
+async function refreshThread(force) {
+  if (!convOpenId) return;
+  let c;
+  try { c = await api(`/api/chats/${encodeURIComponent(convOpenId)}`); } catch { return; }
+  const sig = c.messages.length + "|" + (c.messages[c.messages.length - 1]?.ts || "");
+  if (!force && sig === convSig) return;
+  convSig = sig;
+  const th = $("#thread"); if (!th) return;
+  const atBottom = th.scrollHeight - th.scrollTop - th.clientHeight < 60;
+  th.innerHTML = threadHtml(c);
+  if (force || atBottom) th.scrollTop = th.scrollHeight;
+}
+async function pollConversas() {
+  if (!location.hash.includes("conversas")) return;
+  await loadList(false);
+  if (convOpenId) await refreshThread(false);
 }
 const escapeHtml = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function mediaHtml(m) {
-  if (!m.type || !m.media) return "";
+  if (!m.type) return "";
+  if (!m.media) return `<span class="media-missing">${{ image: "📷", audio: "🎤", video: "🎬", document: "📄", sticker: "🃏" }[m.type] || "📎"} (mídia indisponível)</span>`;
   const src = `/media/${encodeURIComponent(m.media)}?t=${encodeURIComponent(TOKEN)}`;
   if (m.type === "image" || m.type === "sticker") return `<a href="${src}" target="_blank" rel="noopener"><img class="bubble-media" src="${src}" alt="imagem" loading="lazy"/></a>`;
   if (m.type === "audio") return `<audio class="bubble-audio" controls preload="none" src="${src}"></audio>`;

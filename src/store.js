@@ -68,6 +68,7 @@ export async function listConversations() {
         number: id.split("@")[0],
         name: conv.meta?.name || "",
         handoff: Boolean(conv.meta?.handoff),
+        paused: Boolean(conv.meta?.paused),
         lastMessage: last?.content || "",
         lastRole: last?.role || "",
         lastTs: conv.meta?.updatedAt || last?.ts || null,
@@ -84,6 +85,7 @@ export async function getMessages(id, limit = 200) {
     number: id.split("@")[0],
     name: conv.meta?.name || "",
     handoff: Boolean(conv.meta?.handoff),
+    paused: Boolean(conv.meta?.paused),
     messages: conv.messages.slice(-limit),
   };
 }
