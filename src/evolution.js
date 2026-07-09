@@ -88,12 +88,18 @@ export async function logout() {
 }
 
 // Send a text message. `to` may be a bare number or a full JID.
+// WhatsApp privacy IDs (@lid) must be sent as the FULL JID — Evolution v2.3+
+// routes them natively, but stripping to a bare number yields "exists:false".
 export async function sendText(to, body) {
   if (!KEY) {
     console.warn("[evolution] EVOLUTION_API_KEY not set — skipping send");
     return { skipped: true };
   }
-  const number = jidToNumber(to);
+  const s = String(to);
+  let number;
+  if (s.includes("@lid")) number = s; // keep full LID JID
+  else if (s.includes("@")) number = jidToNumber(s); // s.whatsapp.net -> bare number
+  else number = s; // already a bare number
   const res = await api.post(`/message/sendText/${INSTANCE}`, {
     number,
     text: String(body).slice(0, 4096),
