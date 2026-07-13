@@ -65,10 +65,14 @@ export async function listConversations() {
       const last = conv.messages[conv.messages.length - 1];
       return {
         id,
-        number: id.split("@")[0],
+        number: conv.meta?.number || id.split("@")[0],
         name: conv.meta?.name || "",
+        instance: conv.meta?.instance || "",
+        country: conv.meta?.country || "",
         handoff: Boolean(conv.meta?.handoff),
         paused: Boolean(conv.meta?.paused),
+        quote: Boolean(conv.meta?.quote),
+        labels: conv.meta?.labels || [],
         lastMessage: last?.content || "",
         lastRole: last?.role || "",
         lastTs: conv.meta?.updatedAt || last?.ts || null,
@@ -82,12 +86,23 @@ export async function getMessages(id, limit = 200) {
   const conv = await getConversation(id);
   return {
     id,
-    number: id.split("@")[0],
+    number: conv.meta?.number || id.split("@")[0],
     name: conv.meta?.name || "",
+    instance: conv.meta?.instance || "",
+    country: conv.meta?.country || "",
     handoff: Boolean(conv.meta?.handoff),
     paused: Boolean(conv.meta?.paused),
+    quote: Boolean(conv.meta?.quote),
+    labels: conv.meta?.labels || [],
     messages: conv.messages.slice(-limit),
   };
+}
+
+// Replace the label set for a conversation.
+export async function setLabels(id, labels) {
+  const clean = Array.from(new Set((labels || []).map((l) => String(l).trim()).filter(Boolean))).slice(0, 12);
+  await setMeta(id, { labels: clean });
+  return clean;
 }
 
 // Aggregate stats for the dashboard KPIs and charts.

@@ -316,3 +316,39 @@ svg { display: block; }
 .menu-toggle { display: none; }
 .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 35; opacity: 0; pointer-events: none; transition: 0.2s; }
 .scrim.show { opacity: 1; pointer-events: auto; }
+
+/* ---------- Phase 2A: filters, labels, multi-number ---------- */
+.conv-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.fchip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted); cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border-2); transition: all 0.15s;
+}
+.fchip:hover { background: var(--surface-2); color: var(--text); }
+.fchip.on { background: var(--brand-soft); color: var(--brand-700); border-color: color-mix(in srgb, var(--brand) 30%, transparent); }
+:root[data-theme="dark"] .fchip.on { color: var(--brand); }
+.fchip .icon { width: 14px; height: 14px; }
+.lbl-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* label chips on conversation rows */
+.lbl {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  color: var(--lc); background: color-mix(in srgb, var(--lc) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--lc) 30%, transparent);
+}
+.item-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+
+.flag { font-size: 13px; }
+
+/* label editor bar in the open chat */
+.chat-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 11px 18px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.labels-lead { color: var(--muted-2); display: inline-flex; }
+.lbl-toggle {
+  padding: 4px 11px; border-radius: 999px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  color: var(--muted); background: var(--surface); border: 1px solid var(--border-2); transition: all 0.12s;
+}
+.lbl-toggle:hover { border-color: var(--lc); color: var(--lc); }
+.lbl-toggle.on { color: #fff; background: var(--lc); border-color: var(--lc); }
+
+/* multi-number connection grid */
+.num-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+@media (max-width: 1080px) { .num-grid { grid-template-columns: 1fr; } }

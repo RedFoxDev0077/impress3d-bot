@@ -9,6 +9,7 @@ import {
   getHistory,
   appendMessage,
   setMeta,
+  setLabels,
   listConversations,
   getMessages,
   getStats,
@@ -28,6 +29,10 @@ const DASH_PASSWORD = process.env.DASHBOARD_PASSWORD || "impress3d";
 const DASH_SECRET = process.env.DASHBOARD_SECRET || VERIFY_TOKEN || "change-me-secret";
 const PUBLIC_URL = process.env.PUBLIC_URL || "https://api.impress3d.com.br";
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
+const WEBHOOK_URL = `${PUBLIC_URL}/webhook/evolution`;
+
+// Detects a price / quote request so those conversations get separated.
+const QUOTE_RE = /\bor(ç|c)ament|quanto\s+(custa|fica|sai|é|e|seria)|qual\s+(o\s+)?(preç|prec|valor)|\bpre(ç|c)o|cota(ç|c)(ã|a)o|\bor(ç|c)ar|fa(z|ç)er?\s+(uma|um)\s+(pe(ç|c)a|impress|modelo)|imprimir\s+(uma|um|isso|este|esta)/i;
 
 const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "video/mp4": "mp4", "application/pdf": "pdf" };
 const extFromMime = (mime = "") => MIME_EXT[String(mime).split(";")[0].trim()] || "";
@@ -43,9 +48,9 @@ function mediaAck(type) {
 
 app.use(express.json({ limit: "2mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
 
-// Provider-agnostic send.
-async function sendText(to, body) {
-  return WA_PROVIDER === "meta" ? meta.sendText(to, body) : evolution.sendText(to, body);
+// Provider-agnostic send (instance-aware for Evolution).
+async function sendText(instance, to, body) {
+  return WA_PROVIDER === "meta" ? meta.sendText(to, body) : evolution.sendText(instance, to, body);
 }
 
 // ---------- Auth (single admin) ----------
@@ -81,13 +86,22 @@ app.post("/api/chats/:id/pause", requireAuth, async (req, res) => {
   res.json({ ok: true, paused });
 });
 
+// Set the conversation's labels (tags).
+app.post("/api/chats/:id/labels", requireAuth, async (req, res) => {
+  const id = decodeURIComponent(req.params.id);
+  const labels = await setLabels(id, req.body?.labels || []);
+  res.json({ ok: true, labels });
+});
+
 // Send a manual message as the business (from the dashboard).
 app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
   const id = decodeURIComponent(req.params.id);
   const text = String(req.body?.text || "").trim();
   if (!text) return res.status(400).json({ error: "texto vazio" });
   try {
-    await sendText(id, text);
+    const conv = await getConversation(id);
+    const instance = conv.meta?.instance || evolution.meta.DEFAULT_INSTANCE;
+    await sendText(instance, id, text);
     await appendMessage(id, "assistant", text, null, { agent: true });
     res.json({ ok: true });
   } catch (e) {
@@ -96,40 +110,53 @@ app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/connection", requireAuth, async (_req, res) => {
-  if (WA_PROVIDER !== "evolution") return res.json({ provider: "meta", state: "n/a" });
-  const state = await evolution.connectionState();
-  res.json({ provider: "evolution", instance: evolution.meta.INSTANCE, state });
+// ---------- Connection (multi-number) ----------
+app.get("/api/instances", requireAuth, async (_req, res) => {
+  if (WA_PROVIDER !== "evolution") return res.json([{ id: "meta", label: "Meta", country: "", state: "n/a" }]);
+  const list = evolution.getInstances();
+  const out = await Promise.all(list.map(async (i) => ({ ...i, state: await evolution.connectionState(i.id) })));
+  res.json(out);
 });
 
-app.post("/api/connection/connect", requireAuth, async (_req, res) => {
+app.get("/api/connection", requireAuth, async (req, res) => {
+  if (WA_PROVIDER !== "evolution") return res.json({ provider: "meta", state: "n/a" });
+  const instance = req.query.instance || evolution.meta.DEFAULT_INSTANCE;
+  const state = await evolution.connectionState(instance);
+  res.json({ provider: "evolution", instance, state });
+});
+
+app.post("/api/connection/connect", requireAuth, async (req, res) => {
+  const instance = req.body?.instance || req.query.instance || evolution.meta.DEFAULT_INSTANCE;
   try {
-    await evolution.ensureInstance(`${PUBLIC_URL}/webhook/evolution`);
-    const { state, qr } = await evolution.connect();
-    res.json({ state, qr });
+    await evolution.ensureInstance(instance, WEBHOOK_URL);
+    const { state, qr } = await evolution.connect(instance);
+    res.json({ state, qr, instance });
   } catch (e) {
     console.error("[connect]", e.response?.data || e.message);
     res.status(502).json({ error: "não foi possível gerar o QR", detail: e.response?.data || e.message });
   }
 });
 
-app.post("/api/connection/logout", requireAuth, async (_req, res) => {
-  res.json({ ok: await evolution.logout() });
+app.post("/api/connection/logout", requireAuth, async (req, res) => {
+  const instance = req.body?.instance || req.query.instance || evolution.meta.DEFAULT_INSTANCE;
+  res.json({ ok: await evolution.logout(instance) });
 });
 
 // ---------- WhatsApp: Evolution webhook ----------
-async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext }) {
-  // If an agent paused the AI for this chat, we still record the message
-  // (so it shows in the dashboard) but do NOT auto-reply.
+async function handleInbound({ instance, jid, name, text, hasText, id, mediaType, raw, ext }) {
+  instance = instance || evolution.meta.DEFAULT_INSTANCE;
+  const country = evolution.countryOf(instance);
   const conv = await getConversation(jid);
   const paused = Boolean(conv.meta?.paused);
+  // Record which number/country this conversation belongs to.
+  await setMeta(jid, { instance, country, number: conv.meta?.number || jid.split("@")[0] });
 
   // ---- Media (image / audio / video / document / sticker) ----
   if (mediaType) {
     const label = { image: "📷 Imagem", audio: "🎤 Áudio", video: "🎬 Vídeo", sticker: "🃏 Figurinha", document: "📄 Documento" }[mediaType] || "📎 Mídia";
     let mediaFile = null;
     try {
-      const md = await evolution.getMediaBase64(raw);
+      const md = await evolution.getMediaBase64(instance, raw);
       if (md?.base64) {
         const e = extFromMime(md.mimetype) || ext || "bin";
         mediaFile = `${Date.now()}_${String(id).replace(/[^\w]/g, "").slice(0, 24)}.${e}`;
@@ -139,49 +166,52 @@ async function handleInbound({ jid, name, text, hasText, id, mediaType, raw, ext
     } catch (e) {
       console.warn("[media] fetch failed:", e.response?.data || e.message);
     }
-    console.log(`[msg] ${jid} (${name}): <${mediaType}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
+    console.log(`[msg:${instance}] ${jid} (${name}): <${mediaType}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
     await appendMessage(jid, "user", hasText ? text : label, name, { type: mediaType, media: mediaFile });
     if (paused) return;
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
-    await sendText(jid, reply);
+    await sendText(instance, jid, reply);
     return;
   }
 
   if (!hasText) {
-    if (!paused) await sendText(jid, "De momento consigo responder a mensagens de texto. Pode escrever a sua questão? 🙂");
+    if (!paused) await sendText(instance, jid, "De momento consigo responder a mensagens de texto. Pode escrever a sua questão? 🙂");
     return;
   }
-  console.log(`[msg] ${jid} (${name}): ${text}${paused ? " [IA pausada]" : ""}`);
+  console.log(`[msg:${instance}] ${jid} (${name}): ${text}${paused ? " [IA pausada]" : ""}`);
   await appendMessage(jid, "user", text, name);
+
+  // Auto-separate quote requests with an "Orçamento" label.
+  if (QUOTE_RE.test(text)) {
+    const labels = new Set(conv.meta?.labels || []);
+    labels.add("Orçamento");
+    await setMeta(jid, { quote: true, labels: [...labels] });
+  }
 
   if (text.toLowerCase().includes(HANDOFF_KEYWORD)) {
     await setMeta(jid, { handoff: true, handoffAt: new Date().toISOString(), paused: true });
-    if (!paused) await sendText(jid, "Sem problema — vou encaminhar para um colega da equipa. Aguarde só um momento. 👍");
+    if (!paused) await sendText(instance, jid, "Sem problema — vou encaminhar para um colega da equipa. Aguarde só um momento. 👍");
     return;
   }
 
-  if (paused) return; // manual takeover — an agent will reply from the dashboard
+  if (paused) return; // manual takeover — an agent replies from the dashboard
 
   const history = await getHistory(jid);
   let reply;
   const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
   if (!hasAIKey) {
-    // Milestone 1: works with no paid API key — simple auto-reply. Upgrades to
-    // full Claude replies automatically once ANTHROPIC_API_KEY is set.
-    reply =
-      process.env.SIMPLE_REPLY ||
-      "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
+    reply = process.env.SIMPLE_REPLY || "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
   } else {
     try {
-      reply = await generateReply(history);
+      reply = await generateReply(history, { country });
     } catch (e) {
       console.error("[ai] error:", e.response?.data || e.message);
       reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
     }
   }
   await appendMessage(jid, "assistant", reply);
-  await sendText(jid, reply);
+  await sendText(instance, jid, reply);
 }
 
 app.post("/webhook/evolution", async (req, res) => {
@@ -210,7 +240,7 @@ app.post("/webhook", async (req, res) => {
     const jid = msg.from;
     const name = change?.contacts?.[0]?.profile?.name || "";
     const text = msg.type === "text" ? msg.text.body.trim() : "";
-    await handleInbound({ jid, name, text, hasText: Boolean(text), id: msg.id });
+    await handleInbound({ instance: evolution.meta.DEFAULT_INSTANCE, jid, name, text, hasText: Boolean(text), id: msg.id });
   } catch (e) {
     console.error("[webhook meta] error:", e);
   }
@@ -238,4 +268,10 @@ app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "public", "index.h
 
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`impress3d-bot listening on 127.0.0.1:${PORT} (wa=${WA_PROVIDER}, ai=${process.env.AI_PROVIDER || "anthropic"})`);
+  // Ensure every configured number exists and points its webhook at us.
+  if (WA_PROVIDER === "evolution") {
+    for (const i of evolution.getInstances()) {
+      evolution.ensureInstance(i.id, WEBHOOK_URL).catch(() => {});
+    }
+  }
 });

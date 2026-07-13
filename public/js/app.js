@@ -28,7 +28,25 @@ const P = {
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>',
   check: '<polyline points="20 6 9 17 4 12"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.4-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  tag: '<path d="M20.59 13.41 12 22l-9-9V3h10l7.59 7.59a2 2 0 0 1 0 2.82z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor"/>',
+  filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+  pause: '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>',
+  play: '<polygon points="6 4 20 12 6 20 6 4"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
 };
+
+/* ---- labels (tags) ---- */
+const LABELS = [
+  { name: "Orçamento", color: "#f59e0b" },
+  { name: "Filamentos", color: "#0ea5e9" },
+  { name: "Cursos", color: "#8b5cf6" },
+  { name: "Loja", color: "#ec4899" },
+  { name: "Urgente", color: "#f43f5e" },
+  { name: "Resolvido", color: "#22c55e" },
+];
+const labelColor = (name) => LABELS.find((l) => l.name === name)?.color || "#64748b";
+const labelChip = (name) => `<span class="lbl" style="--lc:${labelColor(name)}">${escapeHtml(name)}</span>`;
 const ico = (name, cls = "icon") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
 
 /* ---- helpers ---- */
@@ -232,77 +250,117 @@ async function pageDashboard(v) {
   } catch (e) { v.innerHTML = `<div class="empty-state">${ico("activity")}<div>Não foi possível carregar os dados.</div></div>`; }
 }
 
-/* ================= CONEXÃO / QR ================= */
-let qrPoll = null;
-async function pageConexao(v) {
-  v.innerHTML = `
-    <div class="qr-grid">
-      <div class="card qr-stage">
-        <div class="between" style="width:100%"><div class="card-head" style="margin:0"><div>${ico("qr")}</div><h3>Ligar o WhatsApp</h3></div>
-          <span class="badge" id="qrState"><span class="dot"></span> …</span></div>
-        <div class="qr-frame empty" id="qrFrame" style="margin-top:18px">${ico("qr", "icon")}<div style="position:absolute;bottom:14px;font-size:12px;color:var(--muted-2)">Gere o QR para começar</div></div>
-        <div class="row" style="margin-top:20px">
-          <button class="btn btn-primary" id="genBtn">${ico("qr", "icon icon-sm")} Gerar QR Code</button>
-          <button class="btn" id="refreshBtn">${ico("refresh", "icon icon-sm")} Atualizar</button>
-          <button class="btn btn-danger" id="logoutWa">${ico("power", "icon icon-sm")} Desligar</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><div>${ico("phone")}</div><h3>Como ligar</h3></div>
-        <div class="steps">
-          <div class="step"><div class="n"></div><div class="t">Abra o <b>WhatsApp</b> no telemóvel do número da empresa</div></div>
-          <div class="step"><div class="n"></div><div class="t">Toque em <b>Definições → Aparelhos ligados</b><small>No Android: menu ⋮ → Aparelhos ligados</small></div></div>
-          <div class="step"><div class="n"></div><div class="t">Toque em <b>Ligar um aparelho</b></div></div>
-          <div class="step"><div class="n"></div><div class="t">Aponte a câmara para o <b>QR Code</b> ao lado</div></div>
-          <div class="step"><div class="n"></div><div class="t">Pronto! A IA começa a responder automaticamente ✅</div></div>
-        </div>
-        <div class="divider"></div>
-        <div class="muted" style="font-size:12.5px">${ico("link", "icon icon-sm")} O QR expira em ~40s. Se falhar, toque em <b>Atualizar</b>.</div>
-      </div>
-    </div>`;
-  const frame = $("#qrFrame"), stateB = $("#qrState");
+/* ================= CONEXÃO / QR (multi-número) ================= */
+let connPolls = {};
+function stopConnPolls() { Object.values(connPolls).forEach(clearInterval); connPolls = {}; }
+function connCardHtml(i) {
+  const title = `${i.flag || flagOf(i.country) || ""} ${escapeHtml(i.label || i.id)}`.trim();
+  return `<div class="card qr-stage" data-inst="${escapeHtml(i.id)}">
+    <div class="between" style="width:100%">
+      <div class="card-head" style="margin:0"><div>${ico("qr")}</div><h3>${title}</h3></div>
+      <span class="badge" data-role="state"><span class="dot"></span> …</span>
+    </div>
+    <div class="qr-frame empty" data-role="frame" style="margin-top:18px">${ico("qr", "icon")}<div style="position:absolute;bottom:14px;font-size:12px;color:var(--muted-2)">Gere o QR para ligar</div></div>
+    <div class="row" style="margin-top:18px">
+      <button class="btn btn-primary" data-role="gen">${ico("qr", "icon icon-sm")} Gerar QR</button>
+      <button class="btn btn-danger" data-role="out">${ico("power", "icon icon-sm")} Desligar</button>
+    </div>
+  </div>`;
+}
+function wireConnCard(i) {
+  const card = document.querySelector(`.qr-stage[data-inst="${CSS.escape(i.id)}"]`); if (!card) return;
+  const frame = card.querySelector('[data-role="frame"]'), stateB = card.querySelector('[data-role="state"]');
   let lastQrAt = 0;
   const setState = (st) => {
-    const map = { open: ["ok live", "Conectado ✅"], connecting: ["warn", "Aguardando leitura…"], close: ["off", "Desconectado"], not_created: ["off", "Não configurado"] };
+    const map = { open: ["ok live", "Conectado ✅"], connecting: ["warn", "Aguardando leitura…"], close: ["off", "Desligado"], not_created: ["off", "Não ligado"] };
     const [cls, txt] = map[st] || ["off", st]; stateB.className = `badge ${cls}`; stateB.innerHTML = `<span class="dot"></span> ${txt}`;
   };
+  setState(i.state);
   async function poll() {
     try {
-      const c = await api("/api/connection"); setState(c.state); refreshConnBadge();
-      if (c.state === "open") { clearInterval(qrPoll); qrPoll = null; frame.className = "qr-frame"; frame.innerHTML = `<div style="text-align:center;color:var(--brand-700)">${ico("check", "icon")}<div style="margin-top:8px;font-weight:600">Ligado!</div></div>`; toast("WhatsApp conectado 🎉"); return; }
-      // Keep the displayed QR fresh — WhatsApp rotates it every ~20s, so a static QR goes stale and fails.
+      const c = await api(`/api/connection?instance=${encodeURIComponent(i.id)}`); setState(c.state); refreshConnBadge();
+      if (c.state === "open") { clearInterval(connPolls[i.id]); delete connPolls[i.id]; frame.className = "qr-frame"; frame.innerHTML = `<div style="text-align:center;color:var(--brand-700)">${ico("check", "icon")}<div style="margin-top:8px;font-weight:600">Ligado!</div></div>`; return; }
       if (c.state === "connecting" && frame.querySelector("img") && Date.now() - lastQrAt > 18000) {
-        try { const r = await api("/api/connection/connect", { method: "POST" }); if (r.qr) { frame.querySelector("img").src = r.qr; lastQrAt = Date.now(); } } catch {}
+        try { const r = await api("/api/connection/connect", { method: "POST", body: JSON.stringify({ instance: i.id }) }); if (r.qr) { frame.querySelector("img").src = r.qr; lastQrAt = Date.now(); } } catch {}
       }
     } catch {}
   }
   async function generate() {
-    const btn = $("#genBtn"); btn.disabled = true; btn.innerHTML = `${ico("refresh", "icon icon-sm spin")} A gerar…`;
+    const btn = card.querySelector('[data-role="gen"]'); btn.disabled = true; btn.innerHTML = `${ico("refresh", "icon icon-sm spin")} A gerar…`;
     frame.className = "qr-frame"; frame.innerHTML = `<div class="qr-skeleton"></div>`;
     try {
-      const { qr, state } = await api("/api/connection/connect", { method: "POST" });
+      const { qr, state } = await api("/api/connection/connect", { method: "POST", body: JSON.stringify({ instance: i.id }) });
       if (qr) { frame.innerHTML = `<img src="${qr}" alt="QR Code WhatsApp"/>`; lastQrAt = Date.now(); setState("connecting"); }
       else if (state === "open") { setState("open"); poll(); }
-      else { frame.className = "qr-frame empty"; frame.innerHTML = "Sem QR — tente atualizar"; }
-      if (!qrPoll) qrPoll = setInterval(poll, 3000);
+      else { frame.className = "qr-frame empty"; frame.innerHTML = "Sem QR — tente novamente"; }
+      if (!connPolls[i.id]) connPolls[i.id] = setInterval(poll, 3000);
     } catch (e) { frame.className = "qr-frame empty"; frame.innerHTML = `${ico("power", "icon")}<div style="margin-top:8px;font-size:12px">Serviço indisponível</div>`; toast(e.data?.error || "Erro ao gerar QR"); }
-    finally { btn.disabled = false; btn.innerHTML = `${ico("qr", "icon icon-sm")} Gerar QR Code`; }
+    finally { btn.disabled = false; btn.innerHTML = `${ico("qr", "icon icon-sm")} Gerar QR`; }
   }
-  $("#genBtn").addEventListener("click", generate);
-  $("#refreshBtn").addEventListener("click", generate);
-  $("#logoutWa").addEventListener("click", async () => { try { await api("/api/connection/logout", { method: "POST" }); toast("WhatsApp desligado"); setState("close"); refreshConnBadge(); } catch { toast("Erro"); } });
-  poll(); if (!qrPoll) qrPoll = setInterval(poll, 4000);
+  card.querySelector('[data-role="gen"]').addEventListener("click", generate);
+  card.querySelector('[data-role="out"]').addEventListener("click", async () => { try { await api("/api/connection/logout", { method: "POST", body: JSON.stringify({ instance: i.id }) }); toast("Número desligado"); setState("close"); refreshConnBadge(); } catch { toast("Erro"); } });
+  if (!connPolls[i.id]) connPolls[i.id] = setInterval(poll, 4000);
 }
-window.addEventListener("hashchange", () => { if (!location.hash.includes("conexao") && qrPoll) { clearInterval(qrPoll); qrPoll = null; } });
+async function pageConexao(v) {
+  let insts = [];
+  try { insts = await api("/api/instances"); } catch {}
+  if (!insts.length) insts = [{ id: "impress3d", label: "WhatsApp", country: "", state: "?" }];
+  v.innerHTML = `
+    <div class="num-grid">
+      ${insts.map(connCardHtml).join("")}
+      <div class="card">
+        <div class="card-head"><div>${ico("phone")}</div><h3>Como ligar cada número</h3></div>
+        <div class="steps">
+          <div class="step"><div class="n"></div><div class="t">Abra o <b>WhatsApp</b> no telemóvel do número (Portugal ou Brasil)</div></div>
+          <div class="step"><div class="n"></div><div class="t">Toque em <b>Definições → Aparelhos ligados</b><small>Android: menu ⋮ → Aparelhos ligados</small></div></div>
+          <div class="step"><div class="n"></div><div class="t">Toque em <b>Ligar um aparelho</b></div></div>
+          <div class="step"><div class="n"></div><div class="t">Aponte a câmara ao <b>QR do cartão desse país</b></div></div>
+          <div class="step"><div class="n"></div><div class="t">Pronto! A IA responde no idioma certo de cada país ✅</div></div>
+        </div>
+        <div class="divider"></div>
+        <div class="muted" style="font-size:12.5px">${ico("link", "icon icon-sm")} O QR renova-se sozinho enquanto espera. Ligue um número em cada cartão.</div>
+      </div>
+    </div>`;
+  stopConnPolls();
+  insts.forEach(wireConnCard);
+}
+window.addEventListener("hashchange", () => { if (!location.hash.includes("conexao")) stopConnPolls(); });
 
 /* ================= CONVERSAS ================= */
 let convPoll = null, convOpenId = null, convSig = "";
+let convFilter = { kind: "all", value: "" };
+const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
+function applyConvFilter(chats) {
+  const f = convFilter;
+  if (f.kind === "quote") return chats.filter((c) => c.quote || (c.labels || []).includes("Orçamento"));
+  if (f.kind === "inst") return chats.filter((c) => c.country === f.value || c.instance === f.value);
+  if (f.kind === "label") return chats.filter((c) => (c.labels || []).includes(f.value));
+  return chats;
+}
+function filterBarHtml() {
+  const chip = (kind, value, label, active) =>
+    `<button class="fchip${active ? " on" : ""}" data-kind="${kind}" data-value="${escapeHtml(value)}">${label}</button>`;
+  const f = convFilter;
+  const parts = [chip("all", "", "Todas", f.kind === "all")];
+  parts.push(chip("quote", "", `${ico("tag", "icon icon-sm")} Orçamentos`, f.kind === "quote"));
+  parts.push(chip("inst", "pt", "🇵🇹 Portugal", f.kind === "inst" && f.value === "pt"));
+  parts.push(chip("inst", "br", "🇧🇷 Brasil", f.kind === "inst" && f.value === "br"));
+  for (const l of LABELS) parts.push(chip("label", l.name, `<span class="lbl-dot" style="background:${l.color}"></span>${l.name}`, f.kind === "label" && f.value === l.name));
+  return `<div class="conv-filters">${parts.join("")}</div>`;
+}
+function wireFilterBar() {
+  document.querySelectorAll(".conv-filters .fchip").forEach((b) =>
+    b.addEventListener("click", () => { convFilter = { kind: b.dataset.kind, value: b.dataset.value }; loadList(false); })
+  );
+}
 async function pageConversas(v) {
   v.innerHTML = `
+    ${filterBarHtml()}
     <div class="chat-layout">
       <div class="card chat-list" id="chatList" style="padding:8px"></div>
       <div class="card chat-panel" id="chatPanel"><div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div></div>
     </div>`;
+  wireFilterBar();
   await loadList(true);
   if (convPoll) clearInterval(convPoll);
   convPoll = setInterval(pollConversas, 4000);
@@ -312,20 +370,36 @@ window.addEventListener("hashchange", () => { if (!location.hash.includes("conve
 function chatItemHtml(c) {
   const tag = c.paused ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">IA pausada</span>'
     : c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : "";
+  const flag = flagOf(c.country);
+  const chips = (c.labels || []).slice(0, 3).map(labelChip).join("");
   return `<div class="item${c.id === convOpenId ? " active" : ""}" data-id="${encodeURIComponent(c.id)}">
       <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
-      <div style="min-width:0;flex:1"><div class="who">${escapeHtml(c.name || c.number)}</div><div class="prev">${(c.lastRole === "assistant" ? "🤖 " : "") + escapeHtml(c.lastMessage || "—")}</div></div>
+      <div style="min-width:0;flex:1">
+        <div class="who">${flag ? `<span class="flag">${flag}</span> ` : ""}${escapeHtml(c.name || c.number)}</div>
+        <div class="prev">${(c.lastRole === "assistant" ? "🤖 " : "") + escapeHtml(c.lastMessage || "—")}</div>
+        ${chips ? `<div class="item-labels">${chips}</div>` : ""}
+      </div>
       <div style="text-align:right"><div class="muted" style="font-size:11px">${timeAgo(c.lastTs)}</div>${tag}</div>
     </div>`;
 }
 async function loadList(autoOpen) {
   let chats = [];
   try { chats = await api("/api/chats"); } catch { return; }
+  document.querySelectorAll(".conv-filters .fchip").forEach((b) => b.classList.toggle("on", b.dataset.kind === convFilter.kind && (b.dataset.value || "") === (convFilter.value || "")));
   const list = $("#chatList"); if (!list) return;
-  if (!chats.length) { list.innerHTML = `<div class="empty-state">${ico("chat")}<div>Sem conversas ainda.</div><div class="muted" style="font-size:12px;margin-top:6px">Assim que um cliente escrever, aparece aqui.</div></div>`; return; }
-  list.innerHTML = chats.map(chatItemHtml).join("");
+  const filtered = applyConvFilter(chats);
+  if (!filtered.length) {
+    const msg = chats.length ? "Nenhuma conversa neste filtro." : "Sem conversas ainda.";
+    list.innerHTML = `<div class="empty-state">${ico("chat")}<div>${msg}</div><div class="muted" style="font-size:12px;margin-top:6px">${chats.length ? "Experimente outro filtro." : "Assim que um cliente escrever, aparece aqui."}</div></div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(chatItemHtml).join("");
   list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", () => openChat(decodeURIComponent(it.dataset.id))));
   if (autoOpen && !convOpenId) list.querySelector(".item")?.click();
+}
+function chatLabelsHtml(active) {
+  return `<span class="labels-lead">${ico("tag", "icon icon-sm")}</span>` +
+    LABELS.map((l) => `<button class="lbl-toggle${active.includes(l.name) ? " on" : ""}" data-label="${escapeHtml(l.name)}" style="--lc:${l.color}">${l.name}</button>`).join("");
 }
 function threadHtml(c) {
   return c.messages.map((m) => {
@@ -346,12 +420,13 @@ async function openChat(id) {
   panel.innerHTML = `
     <div class="chat-panel-head">
       <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
-      <div style="min-width:0"><div style="font-weight:600">${escapeHtml(c.name || c.number)}</div><div class="muted" style="font-size:12px">${c.number}</div></div>
+      <div style="min-width:0"><div style="font-weight:600">${flagOf(c.country) ? flagOf(c.country) + " " : ""}${escapeHtml(c.name || c.number)}</div><div class="muted" style="font-size:12px">${c.number}${c.country ? " · " + (c.country === "pt" ? "Portugal" : "Brasil") : ""}</div></div>
       <label class="pause-toggle" title="Pausar a IA nesta conversa para responder manualmente">
         <input type="checkbox" id="pauseChk" ${c.paused ? "checked" : ""}/>
         <span class="pause-label">${c.paused ? "IA pausada" : "IA ativa"}</span>
       </label>
     </div>
+    <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [])}</div>
     <div class="chat-thread" id="thread">${threadHtml(c) || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>
     <form class="chat-composer" id="composer" autocomplete="off">
       <input class="composer-input" id="composerInput" placeholder="Escreva uma resposta manual…" />
@@ -374,6 +449,16 @@ async function openChat(id) {
     } catch (err) { toast(err.data?.error || "Falha ao enviar"); }
     finally { btn.disabled = false; input.disabled = false; input.focus(); }
   });
+  const curLabels = new Set(c.labels || []);
+  document.querySelectorAll("#chatLabels .lbl-toggle").forEach((b) =>
+    b.addEventListener("click", async () => {
+      const name = b.dataset.label;
+      curLabels.has(name) ? curLabels.delete(name) : curLabels.add(name);
+      b.classList.toggle("on");
+      try { await api(`/api/chats/${encodeURIComponent(id)}/labels`, { method: "POST", body: JSON.stringify({ labels: [...curLabels] }) }); loadList(false); }
+      catch { toast("Erro ao guardar etiqueta"); b.classList.toggle("on"); }
+    })
+  );
 }
 async function refreshThread(force) {
   if (!convOpenId) return;
@@ -434,7 +519,7 @@ async function pageConfig(v) {
       <div class="card">
         <div class="card-head"><div>${ico("heart")}</div><h3>Sobre</h3></div>
         <div class="kv"><span class="k">Projeto</span><span class="v">Impress3D · Atendimento IA</span></div>
-        <div class="kv"><span class="k">Versão</span><span class="v">Milestone 1</span></div>
+        <div class="kv"><span class="k">Versão</span><span class="v">Fase 2A · 2 números</span></div>
         <div class="kv"><span class="k">Domínio</span><span class="v">api.impress3d.com.br</span></div>
       </div>
     </div>`;
