@@ -121,9 +121,11 @@ function renderLogin() {
 const NAV = [
   { id: "", label: "Dashboard", icon: "grid" },
   { id: "conexao", label: "Conexão", icon: "qr" },
-  { id: "conversas", label: "Conversas", icon: "chat" },
+  { id: "pt", label: "🇵🇹 Portugal", icon: "chat" },
+  { id: "br", label: "🇧🇷 Brasil", icon: "chat" },
   { id: "config", label: "Configurações", icon: "settings" },
 ];
+const isConvHash = () => ["pt", "br"].includes((location.hash.replace(/^#\/?/, "") || "").split("/")[0]);
 function renderApp() {
   initTheme();
   document.body.innerHTML = "";
@@ -174,7 +176,7 @@ async function refreshConnBadge() {
 }
 
 /* ================= ROUTER ================= */
-const TITLES = { "": ["Dashboard", "Visão geral do atendimento"], conexao: ["Conexão", "Ligar o WhatsApp por QR Code"], conversas: ["Conversas", "Histórico de mensagens"], config: ["Configurações", "Definições do assistente"] };
+const TITLES = { "": ["Dashboard", "Visão geral do atendimento"], conexao: ["Conexão", "Ligar o WhatsApp por QR Code"], pt: ["🇵🇹 Portugal", "Conversas do número de Portugal"], br: ["🇧🇷 Brasil", "Conversas do número do Brasil"], config: ["Configurações", "Definições do assistente"] };
 function route() {
   if (!TOKEN) return renderLogin();
   const id = (location.hash.replace(/^#\/?/, "") || "").split("/")[0];
@@ -183,7 +185,7 @@ function route() {
   document.querySelectorAll(".nav-item[data-id]").forEach((a) => a.classList.toggle("active", a.dataset.id === id));
   $("#sidebar").classList.remove("open"); $("#scrim").classList.remove("show");
   const v = $("#view"); v.innerHTML = `<div class="empty-state">${ico("refresh", "icon spin")}<div style="margin-top:8px">A carregar…</div></div>`;
-  ({ "": pageDashboard, conexao: pageConexao, conversas: pageConversas, config: pageConfig }[id] || pageDashboard)(v);
+  ({ "": pageDashboard, conexao: pageConexao, pt: (el) => pageConversas(el, "pt"), br: (el) => pageConversas(el, "br"), config: pageConfig }[id] || pageDashboard)(v);
 }
 
 /* ================= DASHBOARD ================= */
@@ -256,7 +258,7 @@ async function pageDashboard(v) {
         </div>
         <div class="card">
           <div class="card-head"><div>${ico("chat")}</div><h3>Conversas recentes</h3>
-            <a href="#/conversas" class="btn btn-ghost" style="margin-left:auto">Ver todas</a></div>
+            <a href="#/pt" class="btn btn-ghost" style="margin-left:auto">Ver todas</a></div>
           ${logs}
         </div>
       </div>`;
@@ -342,13 +344,14 @@ window.addEventListener("hashchange", () => { if (!location.hash.includes("conex
 /* ================= CONVERSAS ================= */
 let convPoll = null, convOpenId = null, convSig = "";
 let convFilter = { kind: "all", value: "" };
+let convScope = ""; // "pt" | "br" — the country page currently open
 const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
 function applyConvFilter(chats) {
+  let list = convScope ? chats.filter((c) => c.country === convScope) : chats;
   const f = convFilter;
-  if (f.kind === "quote") return chats.filter((c) => c.quote || (c.labels || []).includes("Orçamentos") || (c.labels || []).includes("Orçamento"));
-  if (f.kind === "inst") return chats.filter((c) => c.country === f.value || c.instance === f.value);
-  if (f.kind === "label") return chats.filter((c) => (c.labels || []).includes(f.value));
-  return chats;
+  if (f.kind === "quote") return list.filter((c) => c.quote || (c.labels || []).includes("Orçamentos") || (c.labels || []).includes("Orçamento"));
+  if (f.kind === "label") return list.filter((c) => (c.labels || []).includes(f.value));
+  return list;
 }
 function filterBarHtml() {
   const chip = (kind, value, label, active) =>
@@ -356,11 +359,7 @@ function filterBarHtml() {
   const f = convFilter;
   const parts = [chip("all", "", "Todas", f.kind === "all")];
   parts.push(chip("quote", "", `${ico("tag", "icon icon-sm")} Orçamentos`, f.kind === "quote"));
-  parts.push(chip("inst", "pt", "🇵🇹 Portugal", f.kind === "inst" && f.value === "pt"));
-  parts.push(chip("inst", "br", "🇧🇷 Brasil", f.kind === "inst" && f.value === "br"));
-  // Show the labels of the selected country (or all when no country is picked).
-  const labels = f.kind === "inst" ? labelsForCountry(f.value) : allLabels();
-  for (const l of labels) parts.push(chip("label", l.name, `<span class="lbl-dot" style="background:${l.color}"></span>${l.name}`, f.kind === "label" && f.value === l.name));
+  for (const l of labelsForCountry(convScope)) parts.push(chip("label", l.name, `<span class="lbl-dot" style="background:${l.color}"></span>${l.name}`, f.kind === "label" && f.value === l.name));
   return `<div class="conv-filters">${parts.join("")}</div>`;
 }
 function wireFilterBar() {
@@ -368,7 +367,10 @@ function wireFilterBar() {
     b.addEventListener("click", () => { convFilter = { kind: b.dataset.kind, value: b.dataset.value }; loadList(false); })
   );
 }
-async function pageConversas(v) {
+async function pageConversas(v, country) {
+  convScope = country || "";
+  convFilter = { kind: "all", value: "" };
+  convOpenId = null;
   v.innerHTML = `
     ${filterBarHtml()}
     <div class="chat-layout">
@@ -380,7 +382,7 @@ async function pageConversas(v) {
   if (convPoll) clearInterval(convPoll);
   convPoll = setInterval(pollConversas, 4000);
 }
-window.addEventListener("hashchange", () => { if (!location.hash.includes("conversas") && convPoll) { clearInterval(convPoll); convPoll = null; convOpenId = null; } });
+window.addEventListener("hashchange", () => { if (!isConvHash() && convPoll) { clearInterval(convPoll); convPoll = null; convOpenId = null; } });
 
 function chatItemHtml(c) {
   const tag = c.paused ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">IA pausada</span>'
@@ -403,9 +405,13 @@ async function loadList(autoOpen) {
   document.querySelectorAll(".conv-filters .fchip").forEach((b) => b.classList.toggle("on", b.dataset.kind === convFilter.kind && (b.dataset.value || "") === (convFilter.value || "")));
   const list = $("#chatList"); if (!list) return;
   const filtered = applyConvFilter(chats);
+  const inScope = convScope ? chats.filter((c) => c.country === convScope) : chats;
   if (!filtered.length) {
-    const msg = chats.length ? "Nenhuma conversa neste filtro." : "Sem conversas ainda.";
-    list.innerHTML = `<div class="empty-state">${ico("chat")}<div>${msg}</div><div class="muted" style="font-size:12px;margin-top:6px">${chats.length ? "Experimente outro filtro." : "Assim que um cliente escrever, aparece aqui."}</div></div>`;
+    const noneInCountry = inScope.length === 0;
+    const pais = convScope === "br" ? "do Brasil" : convScope === "pt" ? "de Portugal" : "";
+    const msg = noneInCountry ? `Ainda sem conversas ${pais}.` : "Nenhuma conversa neste filtro.";
+    const sub = noneInCountry ? "Assim que um cliente escrever neste número, aparece aqui." : "Experimente outro filtro.";
+    list.innerHTML = `<div class="empty-state">${ico("chat")}<div>${msg}</div><div class="muted" style="font-size:12px;margin-top:6px">${sub}</div></div>`;
     return;
   }
   list.innerHTML = filtered.map(chatItemHtml).join("");
@@ -488,7 +494,7 @@ async function refreshThread(force) {
   if (force || atBottom) th.scrollTop = th.scrollHeight;
 }
 async function pollConversas() {
-  if (!location.hash.includes("conversas")) return;
+  if (!isConvHash()) return;
   await loadList(false);
   if (convOpenId) await refreshThread(false);
 }
