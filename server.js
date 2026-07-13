@@ -197,7 +197,7 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   // Auto-separate quote requests with an "Orçamento" label.
   if (QUOTE_RE.test(text)) {
     const labels = new Set(conv.meta?.labels || []);
-    labels.add("Orçamento");
+    labels.add("Orçamentos");
     await setMeta(jid, { quote: true, labels: [...labels] });
   }
 

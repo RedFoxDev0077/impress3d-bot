@@ -36,16 +36,29 @@ const P = {
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
 };
 
-/* ---- labels (tags) ---- */
-const LABELS = [
-  { name: "Orçamento", color: "#f59e0b" },
-  { name: "Filamentos", color: "#0ea5e9" },
-  { name: "Cursos", color: "#8b5cf6" },
-  { name: "Loja", color: "#ec4899" },
-  { name: "Urgente", color: "#f43f5e" },
-  { name: "Resolvido", color: "#22c55e" },
-];
-const labelColor = (name) => LABELS.find((l) => l.name === name)?.color || "#64748b";
+/* ---- labels (tags), per country ---- */
+const LABELS_BY_COUNTRY = {
+  pt: [
+    { name: "Projetos Novo", color: "#0ea5e9" },
+    { name: "Orçamentos", color: "#f59e0b" },
+    { name: "Filamentos", color: "#22c55e" },
+  ],
+  br: [
+    { name: "Fornecedores", color: "#6366f1" },
+    { name: "Projetos Novo", color: "#0ea5e9" },
+    { name: "Notas fiscal", color: "#14b8a6" },
+    { name: "Orça Arquivos", color: "#ec4899" },
+    { name: "Orçamentos", color: "#f59e0b" },
+    { name: "Cursos", color: "#8b5cf6" },
+  ],
+};
+function allLabels() {
+  const m = new Map();
+  for (const c of ["pt", "br"]) for (const l of LABELS_BY_COUNTRY[c]) if (!m.has(l.name)) m.set(l.name, l);
+  return [...m.values()];
+}
+const labelsForCountry = (country) => LABELS_BY_COUNTRY[country] || allLabels();
+const labelColor = (name) => { for (const c of ["pt", "br"]) { const l = LABELS_BY_COUNTRY[c].find((x) => x.name === name); if (l) return l.color; } return "#64748b"; };
 const labelChip = (name) => `<span class="lbl" style="--lc:${labelColor(name)}">${escapeHtml(name)}</span>`;
 const ico = (name, cls = "icon") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
 
@@ -332,7 +345,7 @@ let convFilter = { kind: "all", value: "" };
 const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
 function applyConvFilter(chats) {
   const f = convFilter;
-  if (f.kind === "quote") return chats.filter((c) => c.quote || (c.labels || []).includes("Orçamento"));
+  if (f.kind === "quote") return chats.filter((c) => c.quote || (c.labels || []).includes("Orçamentos") || (c.labels || []).includes("Orçamento"));
   if (f.kind === "inst") return chats.filter((c) => c.country === f.value || c.instance === f.value);
   if (f.kind === "label") return chats.filter((c) => (c.labels || []).includes(f.value));
   return chats;
@@ -345,7 +358,9 @@ function filterBarHtml() {
   parts.push(chip("quote", "", `${ico("tag", "icon icon-sm")} Orçamentos`, f.kind === "quote"));
   parts.push(chip("inst", "pt", "🇵🇹 Portugal", f.kind === "inst" && f.value === "pt"));
   parts.push(chip("inst", "br", "🇧🇷 Brasil", f.kind === "inst" && f.value === "br"));
-  for (const l of LABELS) parts.push(chip("label", l.name, `<span class="lbl-dot" style="background:${l.color}"></span>${l.name}`, f.kind === "label" && f.value === l.name));
+  // Show the labels of the selected country (or all when no country is picked).
+  const labels = f.kind === "inst" ? labelsForCountry(f.value) : allLabels();
+  for (const l of labels) parts.push(chip("label", l.name, `<span class="lbl-dot" style="background:${l.color}"></span>${l.name}`, f.kind === "label" && f.value === l.name));
   return `<div class="conv-filters">${parts.join("")}</div>`;
 }
 function wireFilterBar() {
@@ -397,9 +412,9 @@ async function loadList(autoOpen) {
   list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", () => openChat(decodeURIComponent(it.dataset.id))));
   if (autoOpen && !convOpenId) list.querySelector(".item")?.click();
 }
-function chatLabelsHtml(active) {
+function chatLabelsHtml(active, country) {
   return `<span class="labels-lead">${ico("tag", "icon icon-sm")}</span>` +
-    LABELS.map((l) => `<button class="lbl-toggle${active.includes(l.name) ? " on" : ""}" data-label="${escapeHtml(l.name)}" style="--lc:${l.color}">${l.name}</button>`).join("");
+    labelsForCountry(country).map((l) => `<button class="lbl-toggle${active.includes(l.name) ? " on" : ""}" data-label="${escapeHtml(l.name)}" style="--lc:${l.color}">${escapeHtml(l.name)}</button>`).join("");
 }
 function threadHtml(c) {
   return c.messages.map((m) => {
@@ -426,7 +441,7 @@ async function openChat(id) {
         <span class="pause-label">${c.paused ? "IA pausada" : "IA ativa"}</span>
       </label>
     </div>
-    <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [])}</div>
+    <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [], c.country)}</div>
     <div class="chat-thread" id="thread">${threadHtml(c) || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>
     <form class="chat-composer" id="composer" autocomplete="off">
       <input class="composer-input" id="composerInput" placeholder="Escreva uma resposta manual…" />
