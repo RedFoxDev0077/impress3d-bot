@@ -14,7 +14,7 @@ import {
   getMessages,
   getStats,
 } from "./src/store.js";
-import { generateReply } from "./src/ai.js";
+import { generateReply, readPrompt, writePrompt } from "./src/ai.js";
 import * as evolution from "./src/evolution.js";
 import * as meta from "./src/whatsapp.js";
 
@@ -108,6 +108,18 @@ app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
     console.error("[manual send]", e.response?.data || e.message);
     res.status(502).json({ error: "falha ao enviar mensagem" });
   }
+});
+
+// ---------- AI prompt training (editable per country) ----------
+app.get("/api/prompt", requireAuth, async (req, res) => {
+  const country = String(req.query.country || "pt").toLowerCase();
+  res.json({ country, text: await readPrompt(country) });
+});
+app.post("/api/prompt", requireAuth, async (req, res) => {
+  const country = String(req.body?.country || "").toLowerCase();
+  if (!["pt", "br"].includes(country)) return res.status(400).json({ error: "país inválido" });
+  await writePrompt(country, String(req.body?.text || ""));
+  res.json({ ok: true });
 });
 
 // ---------- Connection (multi-number) ----------

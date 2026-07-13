@@ -494,6 +494,22 @@ async function pageConfig(v) {
   let conn = { state: "?", instance: "-", provider: "-" };
   try { conn = await api("/api/connection"); } catch { }
   v.innerHTML = `
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-head"><div>${ico("bot")}</div>
+        <div><h3>Treino da IA · Prompt</h3><div class="sub">Escreva as informações, serviços, preços e o comportamento da IA para cada país. Guarda e passa a valer de imediato.</div></div>
+      </div>
+      <div class="prompt-tabs">
+        <button class="ptab on" data-c="pt">🇵🇹 Portugal</button>
+        <button class="ptab" data-c="br">🇧🇷 Brasil</button>
+        <span class="prompt-status" id="promptStatus"></span>
+      </div>
+      <textarea class="input prompt-area" id="promptArea" rows="16" spellcheck="false" placeholder="A carregar…"></textarea>
+      <div class="row" style="margin-top:12px;justify-content:flex-end;gap:10px">
+        <span class="muted" style="font-size:12px" id="promptHint">Dica: inclua serviços, materiais, tabela de preços, FAQ e quando falar com um humano.</span>
+        <button class="btn" id="promptReload">${ico("refresh", "icon icon-sm")} Recarregar</button>
+        <button class="btn btn-primary" id="promptSave">${ico("check", "icon icon-sm")} Guardar prompt</button>
+      </div>
+    </div>
     <div class="settings-grid">
       <div class="card">
         <div class="card-head"><div>${ico("bot")}</div><h3>Assistente</h3></div>
@@ -524,6 +540,31 @@ async function pageConfig(v) {
       </div>
     </div>`;
   $("#cfgLogout").addEventListener("click", logout);
+
+  // ---- Prompt editor ----
+  let promptCountry = "pt";
+  const area = $("#promptArea"), status = $("#promptStatus");
+  async function loadPrompt() {
+    area.disabled = true; status.textContent = "A carregar…";
+    try { const d = await api(`/api/prompt?country=${promptCountry}`); area.value = d.text || ""; status.textContent = ""; }
+    catch { status.textContent = "Erro ao carregar"; }
+    finally { area.disabled = false; }
+  }
+  document.querySelectorAll(".ptab").forEach((t) => t.addEventListener("click", () => {
+    document.querySelectorAll(".ptab").forEach((x) => x.classList.remove("on"));
+    t.classList.add("on"); promptCountry = t.dataset.c; loadPrompt();
+  }));
+  $("#promptReload").addEventListener("click", loadPrompt);
+  $("#promptSave").addEventListener("click", async () => {
+    const btn = $("#promptSave"); btn.disabled = true; status.textContent = "A guardar…";
+    try {
+      await api("/api/prompt", { method: "POST", body: JSON.stringify({ country: promptCountry, text: area.value }) });
+      status.textContent = "✅ Guardado — já está ativo"; toast("Prompt guardado e ativo");
+      setTimeout(() => (status.textContent = ""), 3000);
+    } catch (e) { status.textContent = "❌ " + (e.data?.error || "Erro ao guardar"); }
+    finally { btn.disabled = false; }
+  });
+  loadPrompt();
 }
 
 /* ================= BOOT ================= */

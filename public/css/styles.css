@@ -352,3 +352,13 @@ svg { display: block; }
 /* multi-number connection grid */
 .num-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
 @media (max-width: 1080px) { .num-grid { grid-template-columns: 1fr; } }
+
+/* prompt editor */
+.prompt-tabs { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.ptab { padding: 8px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--surface); border: 1px solid var(--border-2); cursor: pointer; transition: all 0.15s; }
+.ptab:hover { background: var(--surface-2); color: var(--text); }
+.ptab.on { background: var(--brand-soft); color: var(--brand-700); border-color: color-mix(in srgb, var(--brand) 30%, transparent); }
+:root[data-theme="dark"] .ptab.on { color: var(--brand); }
+.prompt-status { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--muted); }
+.prompt-area { font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.55; resize: vertical; min-height: 300px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+@media (max-width: 860px) { #promptHint { display: none; } }
