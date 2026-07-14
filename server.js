@@ -155,7 +155,26 @@ app.post("/api/connection/logout", requireAuth, async (req, res) => {
 });
 
 // ---------- WhatsApp: Evolution webhook ----------
-async function handleInbound({ instance, jid, name, text, hasText, id, mediaType, raw, ext }) {
+// Generate an AI reply from the conversation history and send it on the right number.
+async function aiReplyAndSend(instance, jid, country) {
+  const history = await getHistory(jid);
+  let reply;
+  const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
+  if (!hasAIKey) {
+    reply = process.env.SIMPLE_REPLY || "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
+  } else {
+    try {
+      reply = await generateReply(history, { country });
+    } catch (e) {
+      console.error("[ai] error:", e.response?.data || e.message);
+      reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
+    }
+  }
+  await appendMessage(jid, "assistant", reply);
+  await sendText(instance, jid, reply);
+}
+
+async function handleInbound({ instance, jid, name, text, hasText, id, mediaType, raw, ext, fileName }) {
   instance = instance || evolution.meta.DEFAULT_INSTANCE;
   const country = evolution.countryOf(instance);
   const conv = await getConversation(jid);
@@ -178,9 +197,17 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
     } catch (e) {
       console.warn("[media] fetch failed:", e.response?.data || e.message);
     }
-    console.log(`[msg:${instance}] ${jid} (${name}): <${mediaType}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
-    await appendMessage(jid, "user", hasText ? text : label, name, { type: mediaType, media: mediaFile });
+    console.log(`[msg:${instance}] ${jid} (${name}): <${mediaType}${fileName ? " " + fileName : ""}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
+    const shown = mediaType === "document" ? `📎 Ficheiro: ${fileName || "documento"}${ext ? ` (.${ext})` : ""}` : label;
+    await appendMessage(jid, "user", hasText ? `${shown} — ${text}` : shown, name, { type: mediaType, media: mediaFile, fileName });
     if (paused) return;
+    if (mediaType === "document") {
+      // A file usually means a quote — tag it and let the AI validate the format on the spot.
+      const labels = new Set(conv.meta?.labels || []); labels.add("Orçamentos");
+      await setMeta(jid, { quote: true, labels: [...labels] });
+      await aiReplyAndSend(instance, jid, country);
+      return;
+    }
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
     await sendText(instance, jid, reply);
@@ -208,22 +235,7 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   }
 
   if (paused) return; // manual takeover — an agent replies from the dashboard
-
-  const history = await getHistory(jid);
-  let reply;
-  const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
-  if (!hasAIKey) {
-    reply = process.env.SIMPLE_REPLY || "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
-  } else {
-    try {
-      reply = await generateReply(history, { country });
-    } catch (e) {
-      console.error("[ai] error:", e.response?.data || e.message);
-      reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
-    }
-  }
-  await appendMessage(jid, "assistant", reply);
-  await sendText(instance, jid, reply);
+  await aiReplyAndSend(instance, jid, country);
 }
 
 app.post("/webhook/evolution", async (req, res) => {

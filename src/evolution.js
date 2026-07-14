@@ -104,14 +104,16 @@ export function parseIncoming(body) {
   const jid = key.remoteJid || "";
   if (jid.endsWith("@g.us") || jid.includes("broadcast")) return null;
   const m = data.message || {};
-  const text = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.documentMessage?.caption || "";
+  // WhatsApp wraps a captioned document in documentWithCaptionMessage.
+  const doc = m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage;
+  const text = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || doc?.caption || m.documentWithCaptionMessage?.message?.documentMessage?.caption || "";
 
-  let mediaType = null, mime = "", ext = "";
+  let mediaType = null, mime = "", ext = "", fileName = "";
   if (m.imageMessage) { mediaType = "image"; mime = m.imageMessage.mimetype || "image/jpeg"; ext = "jpg"; }
   else if (m.audioMessage) { mediaType = "audio"; mime = m.audioMessage.mimetype || "audio/ogg"; ext = "ogg"; }
   else if (m.videoMessage) { mediaType = "video"; mime = m.videoMessage.mimetype || "video/mp4"; ext = "mp4"; }
   else if (m.stickerMessage) { mediaType = "sticker"; mime = "image/webp"; ext = "webp"; }
-  else if (m.documentMessage) { mediaType = "document"; mime = m.documentMessage.mimetype || "application/octet-stream"; ext = (m.documentMessage.fileName || "file").split(".").pop() || "bin"; }
+  else if (doc) { mediaType = "document"; mime = doc.mimetype || "application/octet-stream"; fileName = doc.fileName || ""; ext = (fileName || "file").split(".").pop().toLowerCase() || "bin"; }
 
   return {
     instance: body.instance || DEFAULT_INSTANCE,
@@ -120,7 +122,7 @@ export function parseIncoming(body) {
     name: data.pushName || "",
     text: (text || "").trim(),
     hasText: Boolean((text || "").trim()),
-    mediaType, mime, ext,
+    mediaType, mime, ext, fileName,
     raw: data,
     id: key.id || "",
   };

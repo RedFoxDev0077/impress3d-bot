@@ -362,3 +362,8 @@ svg { display: block; }
 .prompt-status { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--muted); }
 .prompt-area { font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.55; resize: vertical; min-height: 300px; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 @media (max-width: 860px) { #promptHint { display: none; } }
+
+/* create-your-own label input */
+.lbl-new-input { border: 1px dashed var(--border-2); background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--text); outline: none; max-width: 150px; transition: border 0.15s; }
+.lbl-new-input::placeholder { color: var(--muted-2); font-weight: 500; }
+.lbl-new-input:focus { border-color: var(--brand); border-style: solid; box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12); }

@@ -52,13 +52,26 @@ const LABELS_BY_COUNTRY = {
     { name: "Cursos", color: "#8b5cf6" },
   ],
 };
+// Custom labels the user creates (like WhatsApp), discovered from existing conversations.
+const customLabels = { pt: new Map(), br: new Map() };
+function hashColor(s) { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 62% 46%)`; }
+function noteCustomLabels(chats) {
+  let grew = false;
+  for (const c of chats || []) {
+    const cc = c.country; if (!cc || !customLabels[cc]) continue;
+    const preset = new Set(LABELS_BY_COUNTRY[cc].map((l) => l.name));
+    for (const name of c.labels || []) if (name && !preset.has(name) && !customLabels[cc].has(name)) { customLabels[cc].set(name, hashColor(name)); grew = true; }
+  }
+  return grew;
+}
+const customFor = (country) => (customLabels[country] ? [...customLabels[country]].map(([name, color]) => ({ name, color })) : []);
 function allLabels() {
   const m = new Map();
-  for (const c of ["pt", "br"]) for (const l of LABELS_BY_COUNTRY[c]) if (!m.has(l.name)) m.set(l.name, l);
+  for (const c of ["pt", "br"]) for (const l of [...LABELS_BY_COUNTRY[c], ...customFor(c)]) if (!m.has(l.name)) m.set(l.name, l);
   return [...m.values()];
 }
-const labelsForCountry = (country) => LABELS_BY_COUNTRY[country] || allLabels();
-const labelColor = (name) => { for (const c of ["pt", "br"]) { const l = LABELS_BY_COUNTRY[c].find((x) => x.name === name); if (l) return l.color; } return "#64748b"; };
+const labelsForCountry = (country) => (country ? [...(LABELS_BY_COUNTRY[country] || []), ...customFor(country)] : allLabels());
+const labelColor = (name) => { for (const c of ["pt", "br"]) { const l = LABELS_BY_COUNTRY[c].find((x) => x.name === name); if (l) return l.color; if (customLabels[c].has(name)) return customLabels[c].get(name); } return "#64748b"; };
 const labelChip = (name) => `<span class="lbl" style="--lc:${labelColor(name)}">${escapeHtml(name)}</span>`;
 const ico = (name, cls = "icon") => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">${P[name] || ""}</svg>`;
 
@@ -402,6 +415,8 @@ function chatItemHtml(c) {
 async function loadList(autoOpen) {
   let chats = [];
   try { chats = await api("/api/chats"); } catch { return; }
+  // Discover any custom labels and refresh the filter bar if new ones appeared.
+  if (noteCustomLabels(chats)) { const bar = document.querySelector(".conv-filters"); if (bar) { bar.outerHTML = filterBarHtml(); wireFilterBar(); } }
   document.querySelectorAll(".conv-filters .fchip").forEach((b) => b.classList.toggle("on", b.dataset.kind === convFilter.kind && (b.dataset.value || "") === (convFilter.value || "")));
   const list = $("#chatList"); if (!list) return;
   const filtered = applyConvFilter(chats);
@@ -471,15 +486,28 @@ async function openChat(id) {
     finally { btn.disabled = false; input.disabled = false; input.focus(); }
   });
   const curLabels = new Set(c.labels || []);
-  document.querySelectorAll("#chatLabels .lbl-toggle").forEach((b) =>
-    b.addEventListener("click", async () => {
-      const name = b.dataset.label;
-      curLabels.has(name) ? curLabels.delete(name) : curLabels.add(name);
-      b.classList.toggle("on");
-      try { await api(`/api/chats/${encodeURIComponent(id)}/labels`, { method: "POST", body: JSON.stringify({ labels: [...curLabels] }) }); loadList(false); }
-      catch { toast("Erro ao guardar etiqueta"); b.classList.toggle("on"); }
-    })
-  );
+  const labelsBox = $("#chatLabels");
+  async function saveLabels() {
+    try { await api(`/api/chats/${encodeURIComponent(id)}/labels`, { method: "POST", body: JSON.stringify({ labels: [...curLabels] }) }); loadList(false); return true; }
+    catch { toast("Erro ao guardar etiqueta"); return false; }
+  }
+  function renderLabels() {
+    labelsBox.innerHTML = chatLabelsHtml([...curLabels], c.country) + `<input class="lbl-new-input" id="lblNew" placeholder="+ nova etiqueta" maxlength="24" />`;
+    labelsBox.querySelectorAll(".lbl-toggle").forEach((b) => b.addEventListener("click", async () => {
+      const name = b.dataset.label, had = curLabels.has(name);
+      had ? curLabels.delete(name) : curLabels.add(name); b.classList.toggle("on");
+      if (!(await saveLabels())) { had ? curLabels.add(name) : curLabels.delete(name); b.classList.toggle("on"); }
+    }));
+    labelsBox.querySelector("#lblNew").addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return; e.preventDefault();
+      const name = e.target.value.trim(); if (!name) return;
+      if (curLabels.has(name)) { e.target.value = ""; return; }
+      curLabels.add(name);
+      if (c.country && customLabels[c.country] && !LABELS_BY_COUNTRY[c.country].some((l) => l.name === name)) customLabels[c.country].set(name, hashColor(name));
+      if (await saveLabels()) { toast(`Etiqueta "${name}" criada`); renderLabels(); } else curLabels.delete(name);
+    });
+  }
+  renderLabels();
 }
 async function refreshThread(force) {
   if (!convOpenId) return;
@@ -501,12 +529,16 @@ async function pollConversas() {
 const escapeHtml = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function mediaHtml(m) {
   if (!m.type) return "";
-  if (!m.media) return `<span class="media-missing">${{ image: "📷", audio: "🎤", video: "🎬", document: "📄", sticker: "🃏" }[m.type] || "📎"} (mídia indisponível)</span>`;
+  const docName = m.fileName ? escapeHtml(m.fileName) : "documento";
+  if (!m.media) {
+    if (m.type === "document") return `<span class="bubble-doc">📄 ${docName} <span class="muted">(indisponível)</span></span>`;
+    return `<span class="media-missing">${{ image: "📷", audio: "🎤", video: "🎬", sticker: "🃏" }[m.type] || "📎"} (mídia indisponível)</span>`;
+  }
   const src = `/media/${encodeURIComponent(m.media)}?t=${encodeURIComponent(TOKEN)}`;
   if (m.type === "image" || m.type === "sticker") return `<a href="${src}" target="_blank" rel="noopener"><img class="bubble-media" src="${src}" alt="imagem" loading="lazy"/></a>`;
   if (m.type === "audio") return `<audio class="bubble-audio" controls preload="none" src="${src}"></audio>`;
   if (m.type === "video") return `<video class="bubble-media" controls preload="none" src="${src}"></video>`;
-  if (m.type === "document") return `<a class="bubble-doc" href="${src}" target="_blank" rel="noopener">📄 Abrir documento</a>`;
+  if (m.type === "document") return `<a class="bubble-doc" href="${src}" target="_blank" rel="noopener" download>📄 ${docName}</a>`;
   return "";
 }
 
