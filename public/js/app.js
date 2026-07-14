@@ -20,6 +20,7 @@ const P = {
   refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/>',
   power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
   send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  paperclip: '<path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
   bot: '<rect x="3" y="8" width="18" height="12" rx="3"/><path d="M12 8V4M8 3h8"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>',
   clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -465,6 +466,7 @@ async function openChat(id) {
     <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [], c.country)}</div>
     <div class="chat-thread" id="thread">${threadHtml(c) || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>
     <form class="chat-composer" id="composer" autocomplete="off">
+      <label class="icon-btn composer-attach" title="Anexar imagem, áudio, vídeo ou documento">${ico("paperclip", "icon icon-sm")}<input type="file" id="composerFile" hidden accept="image/*,audio/*,video/*,application/pdf" /></label>
       <input class="composer-input" id="composerInput" placeholder="Escreva uma resposta manual…" />
       <button class="btn btn-primary" id="composerSend" type="submit" title="Enviar">${ico("send", "icon icon-sm")}</button>
     </form>`;
@@ -484,6 +486,18 @@ async function openChat(id) {
       input.value = ""; await refreshThread(true); loadList(false);
     } catch (err) { toast(err.data?.error || "Falha ao enviar"); }
     finally { btn.disabled = false; input.disabled = false; input.focus(); }
+  });
+  $("#composerFile").addEventListener("change", async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    if (f.size > 15 * 1024 * 1024) { toast("Ficheiro muito grande (máx. 15 MB)"); e.target.value = ""; return; }
+    const type = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "audio" : f.type.startsWith("video/") ? "video" : "document";
+    toast("A enviar ficheiro…");
+    const b64 = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.readAsDataURL(f); });
+    try {
+      await api(`/api/chats/${encodeURIComponent(id)}/send-media`, { method: "POST", body: JSON.stringify({ base64: b64, type, mime: f.type, fileName: f.name, caption: $("#composerInput").value.trim() }) });
+      $("#composerInput").value = ""; await refreshThread(true); loadList(false); toast("Ficheiro enviado");
+    } catch (err) { toast(err.data?.error || "Falha ao enviar ficheiro"); }
+    finally { e.target.value = ""; }
   });
   const curLabels = new Set(c.labels || []);
   const labelsBox = $("#chatLabels");

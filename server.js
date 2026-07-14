@@ -14,7 +14,7 @@ import {
   getMessages,
   getStats,
 } from "./src/store.js";
-import { generateReply, readPrompt, writePrompt, visionMime } from "./src/ai.js";
+import { generateReply, readPrompt, writePrompt, visionMime, transcribeAudio } from "./src/ai.js";
 import * as evolution from "./src/evolution.js";
 import * as meta from "./src/whatsapp.js";
 
@@ -46,11 +46,35 @@ function mediaAck(type) {
   }[type] || "Recebi a sua mensagem! Respondo-lhe já de seguida. 🙂";
 }
 
-app.use(express.json({ limit: "2mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
+app.use(express.json({ limit: "16mb", verify: (req, _res, buf) => (req.rawBody = buf) }));
 
 // Provider-agnostic send (instance-aware for Evolution).
 async function sendText(instance, to, body) {
   return WA_PROVIDER === "meta" ? meta.sendText(to, body) : evolution.sendText(instance, to, body);
+}
+
+// Detects file links in an outgoing message so they go out as NATIVE media,
+// not a bare URL. (e.g. the AI replies with a photo/video/audio/pdf link.)
+const OUT_MEDIA_RE = /(https?:\/\/[^\s]+?\.(?:jpe?g|png|webp|gif|mp4|mov|m4v|mp3|ogg|m4a|wav|pdf|stl|obj|3mf|step|stp|zip))(?:\?[^\s]*)?/gi;
+function urlMediaType(u) {
+  const ext = u.split("?")[0].split(".").pop().toLowerCase();
+  if (["jpg", "jpeg", "png", "webp", "gif"].includes(ext)) return "image";
+  if (["mp4", "mov", "m4v"].includes(ext)) return "video";
+  if (["mp3", "ogg", "m4a", "wav"].includes(ext)) return "audio";
+  return "document";
+}
+// Send text; if it contains file links, dispatch them as native WhatsApp media.
+async function sendSmart(instance, to, text) {
+  const urls = WA_PROVIDER === "evolution" ? String(text).match(OUT_MEDIA_RE) || [] : [];
+  if (!urls.length) return sendText(instance, to, text);
+  let caption = String(text);
+  for (const u of urls) caption = caption.replace(u, "").trim();
+  let first = true;
+  for (const u of urls) {
+    try { await evolution.sendMedia(instance, to, { url: u, type: urlMediaType(u), caption: first ? caption : "" }); first = false; }
+    catch (e) { console.warn("[sendMedia] fallback to text:", e.response?.data || e.message); await sendText(instance, to, u); }
+  }
+  return { ok: true };
 }
 
 // ---------- Auth (single admin) ----------
@@ -101,12 +125,36 @@ app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
   try {
     const conv = await getConversation(id);
     const instance = conv.meta?.instance || evolution.meta.DEFAULT_INSTANCE;
-    await sendText(instance, id, text);
+    await sendSmart(instance, id, text);
     await appendMessage(id, "assistant", text, null, { agent: true });
     res.json({ ok: true });
   } catch (e) {
     console.error("[manual send]", e.response?.data || e.message);
     res.status(502).json({ error: "falha ao enviar mensagem" });
+  }
+});
+
+// Agent sends a media file (image/audio/video/doc) from the dashboard.
+app.post("/api/chats/:id/send-media", requireAuth, async (req, res) => {
+  const id = decodeURIComponent(req.params.id);
+  const { base64, url, type = "image", mime, fileName, caption } = req.body || {};
+  if (!base64 && !url) return res.status(400).json({ error: "sem ficheiro" });
+  try {
+    const conv = await getConversation(id);
+    const instance = conv.meta?.instance || evolution.meta.DEFAULT_INSTANCE;
+    await evolution.sendMedia(instance, id, { base64, url, type, mime, fileName, caption });
+    let mediaFile = null;
+    if (base64) {
+      const e = extFromMime(mime) || (type === "image" ? "jpg" : type === "audio" ? "ogg" : type === "video" ? "mp4" : "bin");
+      mediaFile = `${Date.now()}_out.${e}`;
+      await fsp.mkdir(MEDIA_DIR, { recursive: true });
+      await fsp.writeFile(path.join(MEDIA_DIR, mediaFile), Buffer.from(base64, "base64"));
+    }
+    await appendMessage(id, "assistant", caption || "", null, { agent: true, type, media: mediaFile, fileName });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("[send-media]", e.response?.data || e.message);
+    res.status(502).json({ error: "falha ao enviar mídia" });
   }
 });
 
@@ -171,7 +219,7 @@ async function aiReplyAndSend(instance, jid, country, opts = {}) {
     }
   }
   await appendMessage(jid, "assistant", reply);
-  await sendText(instance, jid, reply);
+  await sendSmart(instance, jid, reply);
 }
 
 async function handleInbound({ instance, jid, name, text, hasText, id, mediaType, raw, ext, fileName }) {
@@ -199,10 +247,21 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
     } catch (e) {
       console.warn("[media] fetch failed:", e.response?.data || e.message);
     }
+    // Audio → Whisper transcription (when an OpenAI key is set).
+    let transcript = "";
+    if (mediaType === "audio" && mediaB64 && process.env.OPENAI_API_KEY) {
+      try { transcript = await transcribeAudio(mediaB64, mediaMime || "audio/ogg"); console.log(`[whisper] ${jid}: "${transcript.slice(0, 80)}"`); }
+      catch (e) { console.warn("[whisper] failed:", e.message); }
+    }
+
     console.log(`[msg:${instance}] ${jid} (${name}): <${mediaType}${fileName ? " " + fileName : ""}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
-    const shown = mediaType === "document" ? `📎 Ficheiro: ${fileName || "documento"}${ext ? ` (.${ext})` : ""}` : label;
-    const content = mediaType === "document" ? (hasText ? `${shown} — ${text}` : shown) : (hasText ? text : shown);
-    await appendMessage(jid, "user", content, name, { type: mediaType, media: mediaFile, fileName });
+    const shown = mediaType === "document" ? `📎 Ficheiro: ${fileName || "documento"}${ext ? ` (.${ext})` : ""}`
+      : mediaType === "audio" && transcript ? `🎤 ${transcript}`
+      : label;
+    const content = mediaType === "document" ? (hasText ? `${shown} — ${text}` : shown)
+      : mediaType === "audio" ? shown
+      : (hasText ? text : shown);
+    await appendMessage(jid, "user", content, name, { type: mediaType, media: mediaFile, fileName, transcript: transcript || undefined });
     if (paused) return;
 
     const hasAI = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
@@ -222,9 +281,15 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
       return;
     }
 
+    // Audio with a transcript → let the AI answer the spoken question.
+    if (mediaType === "audio" && transcript && hasAI) {
+      await aiReplyAndSend(instance, jid, country);
+      return;
+    }
+
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
-    await sendText(instance, jid, reply);
+    await sendSmart(instance, jid, reply);
     return;
   }
 

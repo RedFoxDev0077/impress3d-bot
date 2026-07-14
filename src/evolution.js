@@ -87,6 +87,23 @@ export async function sendText(instance, to, body) {
   return res.data;
 }
 
+// Send media (image/video/document/audio) natively — from a URL or base64.
+export async function sendMedia(instance, to, { url, base64, type = "image", mime, fileName, caption } = {}) {
+  if (!KEY) { console.warn("[evolution] no key — skipping sendMedia"); return { skipped: true }; }
+  const s = String(to);
+  const number = s.includes("@lid") ? s : s.includes("@") ? jidToNumber(s) : s;
+  const media = url || base64;
+  if (type === "audio") {
+    const res = await api.post(`/message/sendWhatsAppAudio/${instance}`, { number, audio: media });
+    return res.data;
+  }
+  const body = { number, mediatype: type, media, caption: caption || "" };
+  if (mime) body.mimetype = mime;
+  if (fileName) body.fileName = fileName;
+  const res = await api.post(`/message/sendMedia/${instance}`, body);
+  return res.data;
+}
+
 // Fetch decrypted media (base64) for a media message.
 export async function getMediaBase64(instance, rawData) {
   const res = await api.post(`/chat/getBase64FromMediaMessage/${instance}`, { message: rawData });

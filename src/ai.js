@@ -99,6 +99,25 @@ function attachImage(history, image, provider) {
   return msgs;
 }
 
+// ---- Whisper: transcribe a customer's voice note to text (OpenAI) ----
+export async function transcribeAudio(base64, mime = "audio/ogg") {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY not set");
+  const model = process.env.WHISPER_MODEL || "whisper-1";
+  const ext = { "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "audio/wav": "wav" }[String(mime).split(";")[0].trim()] || "ogg";
+  const form = new FormData();
+  form.append("file", new Blob([Buffer.from(base64, "base64")], { type: mime }), `audio.${ext}`);
+  form.append("model", model);
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}` },
+    body: form,
+  });
+  if (!res.ok) throw new Error(`whisper ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  return (data.text || "").trim();
+}
+
 // history: [{role:'user'|'assistant', content}] (most recent last).
 // opts.country selects the PT vs BR system prompt.
 // opts.image = { base64, mime } attaches a photo for vision analysis.
