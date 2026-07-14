@@ -14,7 +14,7 @@ import {
   getMessages,
   getStats,
 } from "./src/store.js";
-import { generateReply, readPrompt, writePrompt } from "./src/ai.js";
+import { generateReply, readPrompt, writePrompt, visionMime } from "./src/ai.js";
 import * as evolution from "./src/evolution.js";
 import * as meta from "./src/whatsapp.js";
 
@@ -156,7 +156,7 @@ app.post("/api/connection/logout", requireAuth, async (req, res) => {
 
 // ---------- WhatsApp: Evolution webhook ----------
 // Generate an AI reply from the conversation history and send it on the right number.
-async function aiReplyAndSend(instance, jid, country) {
+async function aiReplyAndSend(instance, jid, country, opts = {}) {
   const history = await getHistory(jid);
   let reply;
   const hasAIKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
@@ -164,7 +164,7 @@ async function aiReplyAndSend(instance, jid, country) {
     reply = process.env.SIMPLE_REPLY || "Olá! 👋 Obrigado por contactar a *Impress3D*. Recebi a sua mensagem e a nossa equipa responde-lhe já de seguida. 🙂";
   } else {
     try {
-      reply = await generateReply(history, { country });
+      reply = await generateReply(history, { country, ...opts });
     } catch (e) {
       console.error("[ai] error:", e.response?.data || e.message);
       reply = "Peço desculpa, tive um problema técnico a processar a sua mensagem. Pode repetir, por favor?";
@@ -185,10 +185,12 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   // ---- Media (image / audio / video / document / sticker) ----
   if (mediaType) {
     const label = { image: "📷 Imagem", audio: "🎤 Áudio", video: "🎬 Vídeo", sticker: "🃏 Figurinha", document: "📄 Documento" }[mediaType] || "📎 Mídia";
-    let mediaFile = null;
+    let mediaFile = null, mediaB64 = null, mediaMime = "";
     try {
       const md = await evolution.getMediaBase64(instance, raw);
       if (md?.base64) {
+        mediaB64 = md.base64;
+        mediaMime = md.mimetype || "";
         const e = extFromMime(md.mimetype) || ext || "bin";
         mediaFile = `${Date.now()}_${String(id).replace(/[^\w]/g, "").slice(0, 24)}.${e}`;
         await fsp.mkdir(MEDIA_DIR, { recursive: true });
@@ -199,8 +201,12 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
     }
     console.log(`[msg:${instance}] ${jid} (${name}): <${mediaType}${fileName ? " " + fileName : ""}${mediaFile ? "" : " — download failed"}>${hasText ? " " + text : ""}`);
     const shown = mediaType === "document" ? `📎 Ficheiro: ${fileName || "documento"}${ext ? ` (.${ext})` : ""}` : label;
-    await appendMessage(jid, "user", hasText ? `${shown} — ${text}` : shown, name, { type: mediaType, media: mediaFile, fileName });
+    const content = mediaType === "document" ? (hasText ? `${shown} — ${text}` : shown) : (hasText ? text : shown);
+    await appendMessage(jid, "user", content, name, { type: mediaType, media: mediaFile, fileName });
     if (paused) return;
+
+    const hasAI = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
+
     if (mediaType === "document") {
       // A file usually means a quote — tag it and let the AI validate the format on the spot.
       const labels = new Set(conv.meta?.labels || []); labels.add("Orçamentos");
@@ -208,6 +214,14 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
       await aiReplyAndSend(instance, jid, country);
       return;
     }
+
+    // Vision — the AI actually looks at the customer's photo of the part.
+    if ((mediaType === "image" || mediaType === "sticker") && mediaB64 && hasAI && mediaB64.length < 4_500_000) {
+      console.log(`[vision] analysing image for ${jid} (${Math.round(mediaB64.length / 1024)} KB b64)`);
+      await aiReplyAndSend(instance, jid, country, { image: { base64: mediaB64, mime: visionMime(mediaMime) } });
+      return;
+    }
+
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
     await sendText(instance, jid, reply);

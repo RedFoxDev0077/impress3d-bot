@@ -76,9 +76,34 @@ async function callOpenAI(history, system) {
   return res.data.choices[0].message.content.trim();
 }
 
+// ---- Vision: let the model actually look at the customer's photo ----
+const VISION_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+export function visionMime(m) {
+  const t = String(m || "").split(";")[0].trim().toLowerCase();
+  return VISION_MIMES.has(t) ? t : "image/jpeg";
+}
+
+// Attach the image to the most recent user turn, in the provider's format.
+function attachImage(history, image, provider) {
+  const msgs = history.map((m) => ({ ...m }));
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role !== "user") continue;
+    const text = typeof msgs[i].content === "string" ? msgs[i].content : "";
+    const prompt = text || "O cliente enviou esta imagem. Analise-a e responda.";
+    msgs[i] =
+      provider === "openai"
+        ? { role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } }] }
+        : { role: "user", content: [{ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }, { type: "text", text: prompt }] };
+    break;
+  }
+  return msgs;
+}
+
 // history: [{role:'user'|'assistant', content}] (most recent last).
 // opts.country selects the PT vs BR system prompt.
+// opts.image = { base64, mime } attaches a photo for vision analysis.
 export async function generateReply(history, opts = {}) {
   const system = opts.system || (await systemPrompt(opts.country));
-  return PROVIDER === "openai" ? callOpenAI(history, system) : callAnthropic(history, system);
+  const msgs = opts.image?.base64 ? attachImage(history, opts.image, PROVIDER) : history;
+  return PROVIDER === "openai" ? callOpenAI(msgs, system) : callAnthropic(msgs, system);
 }
