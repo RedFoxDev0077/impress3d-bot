@@ -370,3 +370,4 @@ svg { display: block; }
 
 /* composer attach button */
 .composer-attach { flex: 0 0 auto; cursor: pointer; }
+.chat-panel.drop-hi { outline: 2px dashed var(--brand); outline-offset: -6px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }

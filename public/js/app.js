@@ -493,18 +493,28 @@ async function openChat(id) {
     } catch (err) { toast(err.data?.error || "Falha ao enviar"); }
     finally { btn.disabled = false; input.disabled = false; input.focus(); }
   });
-  $("#composerFile").addEventListener("change", async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (f.size > 15 * 1024 * 1024) { toast("Ficheiro muito grande (máx. 15 MB)"); e.target.value = ""; return; }
+  async function uploadAndSend(f) {
+    if (!f) return;
+    if (f.size > 15 * 1024 * 1024) { toast("Ficheiro muito grande (máx. 15 MB)"); return; }
     const type = f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "audio" : f.type.startsWith("video/") ? "video" : "document";
     toast("A enviar ficheiro…");
     const b64 = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.readAsDataURL(f); });
     try {
-      await api(`/api/chats/${encodeURIComponent(id)}/send-media`, { method: "POST", body: JSON.stringify({ base64: b64, type, mime: f.type, fileName: f.name, caption: $("#composerInput").value.trim() }) });
+      await api(`/api/chats/${encodeURIComponent(id)}/send-media`, { method: "POST", body: JSON.stringify({ base64: b64, type, mime: f.type, fileName: f.name || `imagem.${(f.type.split("/")[1] || "png")}`, caption: $("#composerInput").value.trim() }) });
       $("#composerInput").value = ""; await refreshThread(true); loadList(false); toast("Ficheiro enviado");
     } catch (err) { toast(err.data?.error || "Falha ao enviar ficheiro"); }
-    finally { e.target.value = ""; }
+  }
+  $("#composerFile").addEventListener("change", (e) => { uploadAndSend(e.target.files?.[0]); e.target.value = ""; });
+  // Paste an image straight into the chat (Ctrl+V), like WhatsApp.
+  $("#composerInput").addEventListener("paste", (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((it) => it.type.startsWith("image/"));
+    if (item) { e.preventDefault(); uploadAndSend(item.getAsFile()); }
   });
+  // Drag & drop a file onto the conversation.
+  const dropZone = $("#chatPanel");
+  ["dragover", "dragenter"].forEach((ev) => dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.add("drop-hi"); }));
+  ["dragleave", "drop"].forEach((ev) => dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.remove("drop-hi"); }));
+  dropZone.addEventListener("drop", (e) => { const f = e.dataTransfer?.files?.[0]; if (f) uploadAndSend(f); });
   const curLabels = new Set(c.labels || []);
   const labelsBox = $("#chatLabels");
   async function saveLabels() {

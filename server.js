@@ -36,6 +36,26 @@ const WEBHOOK_URL = `${PUBLIC_URL}/webhook/evolution`;
 // Detects a price / quote request so those conversations get separated.
 const QUOTE_RE = /\bor(ç|c)ament|quanto\s+(custa|fica|sai|é|e|seria)|qual\s+(o\s+)?(preç|prec|valor)|\bpre(ç|c)o|cota(ç|c)(ã|a)o|\bor(ç|c)ar|fa(z|ç)er?\s+(uma|um)\s+(pe(ç|c)a|impress|modelo)|imprimir\s+(uma|um|isso|este|esta)/i;
 
+// Which labels exist per country (mirror of the dashboard's sets).
+const COUNTRY_LABELS = {
+  pt: ["Projetos Novo", "Orçamentos", "Filamentos"],
+  br: ["Fornecedores", "Projetos Novo", "Notas fiscal", "Orça Arquivos", "Orçamentos", "Cursos"],
+};
+// Keyword rules to auto-classify a conversation into a label (adjustable).
+const LABEL_RULES = [
+  { label: "Cursos", re: /\bcursos?\b|\baulas?\b|forma(ç|c)(ã|a)o|treinament|workshop|aprender\s+a\s+imprimir/i },
+  { label: "Filamentos", re: /\bfilament|\bpla\b|\bpetg\b|\babs\b|\bresina\b|bobina|rolo\s+de\s+filament|material\s+(para|de)\s+impress/i },
+  { label: "Notas fiscal", re: /nota\s+fiscal|\bnf-?e?\b|\bfatura\b|invoice/i },
+  { label: "Fornecedores", re: /fornecedor|revend|distribuidor|atacado/i },
+];
+// Returns the labels a message should get, restricted to the country's label set.
+function classifyLabels(text, country) {
+  const add = new Set();
+  if (QUOTE_RE.test(text)) add.add("Orçamentos");
+  for (const r of LABEL_RULES) if (r.re.test(text) && (COUNTRY_LABELS[country] || []).includes(r.label)) add.add(r.label);
+  return add;
+}
+
 const MIME_EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/amr": "amr", "video/mp4": "mp4", "application/pdf": "pdf" };
 const extFromMime = (mime = "") => MIME_EXT[String(mime).split(";")[0].trim()] || "";
 function mediaAck(type) {
@@ -323,11 +343,12 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   console.log(`[msg:${instance}] ${jid} (${name}): ${text}${paused ? " [IA pausada]" : ""}`);
   await appendMessage(jid, "user", text, name);
 
-  // Auto-separate quote requests with an "Orçamento" label.
-  if (QUOTE_RE.test(text)) {
+  // Auto-classify the conversation into the country's labels (Orçamentos, Cursos, Filamentos…).
+  const auto = classifyLabels(text, country);
+  if (auto.size) {
     const labels = new Set(conv.meta?.labels || []);
-    labels.add("Orçamentos");
-    await setMeta(jid, { quote: true, labels: [...labels] });
+    for (const l of auto) labels.add(l);
+    await setMeta(jid, { quote: auto.has("Orçamentos") || Boolean(conv.meta?.quote), labels: [...labels] });
   }
 
   if (text.toLowerCase().includes(HANDOFF_KEYWORD)) {
