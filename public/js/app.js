@@ -360,6 +360,11 @@ let convPoll = null, convOpenId = null, convSig = "";
 let convFilter = { kind: "all", value: "" };
 let convScope = ""; // "pt" | "br" — the country page currently open
 const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
+function pauseLabel(c) {
+  if (c.paused) return "IA pausada";
+  if (c.pausedUntil && c.pausedUntil > Date.now()) { const m = Math.max(1, Math.ceil((c.pausedUntil - Date.now()) / 60000)); return `IA pausada (auto ~${m}m)`; }
+  return "IA ativa";
+}
 function applyConvFilter(chats) {
   let list = convScope ? chats.filter((c) => c.country === convScope) : chats;
   const f = convFilter;
@@ -399,7 +404,8 @@ async function pageConversas(v, country) {
 window.addEventListener("hashchange", () => { if (!isConvHash() && convPoll) { clearInterval(convPoll); convPoll = null; convOpenId = null; } });
 
 function chatItemHtml(c) {
-  const tag = c.paused ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">IA pausada</span>'
+  const autoP = c.pausedUntil && c.pausedUntil > Date.now();
+  const tag = (c.paused || autoP) ? `<span class="badge warn" style="margin-top:4px;padding:2px 8px">IA pausada${autoP && !c.paused ? " (auto)" : ""}</span>`
     : c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : "";
   const flag = flagOf(c.country);
   const chips = (c.labels || []).slice(0, 3).map(labelChip).join("");
@@ -459,8 +465,8 @@ async function openChat(id) {
       <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
       <div style="min-width:0"><div style="font-weight:600">${flagOf(c.country) ? flagOf(c.country) + " " : ""}${escapeHtml(c.name || c.number)}</div><div class="muted" style="font-size:12px">${c.number}${c.country ? " · " + (c.country === "pt" ? "Portugal" : "Brasil") : ""}</div></div>
       <label class="pause-toggle" title="Pausar a IA nesta conversa para responder manualmente">
-        <input type="checkbox" id="pauseChk" ${c.paused ? "checked" : ""}/>
-        <span class="pause-label">${c.paused ? "IA pausada" : "IA ativa"}</span>
+        <input type="checkbox" id="pauseChk" ${c.paused || (c.pausedUntil > Date.now()) ? "checked" : ""}/>
+        <span class="pause-label">${pauseLabel(c)}</span>
       </label>
     </div>
     <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [], c.country)}</div>
@@ -588,6 +594,14 @@ async function pageConfig(v) {
         <div class="muted" style="font-size:12.5px">A base de conhecimento (serviços, materiais, preços) é definida no prompt do sistema. Envie o material e afinamos as respostas.</div>
       </div>
       <div class="card">
+        <div class="card-head"><div>${ico("clock")}</div><h3>Pausa automática da IA</h3></div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px">Quando um atendente responde numa conversa, a IA fica em silêncio durante este tempo. Se o cliente responder dentro da janela, a IA continua calada; passado o tempo, volta a responder sozinha.</div>
+        <div class="field"><label>Tempo de pausa (minutos) — 0 desativa</label>
+          <input class="input" type="number" min="0" max="1440" id="autoPauseMin" style="max-width:160px" placeholder="60" /></div>
+        <button class="btn btn-primary" id="autoPauseSave">${ico("check", "icon icon-sm")} Guardar tempo</button>
+        <span class="prompt-status" id="autoPauseStatus" style="margin-left:10px"></span>
+      </div>
+      <div class="card">
         <div class="card-head"><div>${ico("link")}</div><h3>Ligação WhatsApp</h3></div>
         <div class="kv"><span class="k">Fornecedor</span><span class="v">${conn.provider || "Evolution API"}</span></div>
         <div class="kv"><span class="k">Instância</span><span class="v">${conn.instance || "-"}</span></div>
@@ -632,6 +646,19 @@ async function pageConfig(v) {
     finally { btn.disabled = false; }
   });
   loadPrompt();
+
+  // ---- Auto-pause timer setting ----
+  const apInput = $("#autoPauseMin"), apStatus = $("#autoPauseStatus");
+  try { const s = await api("/api/settings"); apInput.value = s.autoPauseMinutes ?? 60; } catch {}
+  $("#autoPauseSave").addEventListener("click", async () => {
+    const btn = $("#autoPauseSave"); btn.disabled = true; apStatus.textContent = "A guardar…";
+    try {
+      const s = await api("/api/settings", { method: "POST", body: JSON.stringify({ autoPauseMinutes: apInput.value }) });
+      apInput.value = s.autoPauseMinutes; apStatus.textContent = "✅ Guardado"; toast("Tempo de pausa guardado");
+      setTimeout(() => (apStatus.textContent = ""), 2500);
+    } catch { apStatus.textContent = "❌ Erro"; }
+    finally { btn.disabled = false; }
+  });
 }
 
 /* ================= BOOT ================= */

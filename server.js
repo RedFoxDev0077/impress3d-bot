@@ -13,6 +13,8 @@ import {
   listConversations,
   getMessages,
   getStats,
+  getSettings,
+  setSettings,
 } from "./src/store.js";
 import { generateReply, readPrompt, writePrompt, visionMime, transcribeAudio } from "./src/ai.js";
 import * as evolution from "./src/evolution.js";
@@ -106,7 +108,8 @@ app.get("/api/chats/:id", requireAuth, async (req, res) =>
 app.post("/api/chats/:id/pause", requireAuth, async (req, res) => {
   const id = decodeURIComponent(req.params.id);
   const paused = Boolean(req.body?.paused);
-  await setMeta(id, { paused });
+  // Resuming clears both the manual pause and any auto-pause window.
+  await setMeta(id, paused ? { paused: true } : { paused: false, pausedUntil: 0 });
   res.json({ ok: true, paused });
 });
 
@@ -127,6 +130,7 @@ app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
     const instance = conv.meta?.instance || evolution.meta.DEFAULT_INSTANCE;
     await sendSmart(instance, id, text);
     await appendMessage(id, "assistant", text, null, { agent: true });
+    await autoPause(id);
     res.json({ ok: true });
   } catch (e) {
     console.error("[manual send]", e.response?.data || e.message);
@@ -151,11 +155,30 @@ app.post("/api/chats/:id/send-media", requireAuth, async (req, res) => {
       await fsp.writeFile(path.join(MEDIA_DIR, mediaFile), Buffer.from(base64, "base64"));
     }
     await appendMessage(id, "assistant", caption || "", null, { agent: true, type, media: mediaFile, fileName });
+    await autoPause(id);
     res.json({ ok: true });
   } catch (e) {
     console.error("[send-media]", e.response?.data || e.message);
     res.status(502).json({ error: "falha ao enviar mídia" });
   }
+});
+
+// The AI is muted for a chat if manually paused OR inside the auto-pause window.
+const isPaused = (m) => Boolean(m?.paused) || (m?.pausedUntil && m.pausedUntil > Date.now());
+// After an agent replies, mute the AI for the configured window.
+async function autoPause(id) {
+  const mins = (await getSettings()).autoPauseMinutes || 0;
+  if (mins > 0) await setMeta(id, { pausedUntil: Date.now() + mins * 60000 });
+}
+
+// ---------- Settings (auto-pause timer, etc.) ----------
+app.get("/api/settings", requireAuth, async (_req, res) => res.json(await getSettings()));
+app.post("/api/settings", requireAuth, async (req, res) => {
+  const patch = {};
+  if (req.body?.autoPauseMinutes !== undefined) {
+    patch.autoPauseMinutes = Math.max(0, Math.min(1440, parseInt(req.body.autoPauseMinutes, 10) || 0));
+  }
+  res.json(await setSettings(patch));
 });
 
 // ---------- AI prompt training (editable per country) ----------
@@ -226,7 +249,7 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   instance = instance || evolution.meta.DEFAULT_INSTANCE;
   const country = evolution.countryOf(instance);
   const conv = await getConversation(jid);
-  const paused = Boolean(conv.meta?.paused);
+  const paused = isPaused(conv.meta);
   // Record which number/country this conversation belongs to.
   await setMeta(jid, { instance, country, number: conv.meta?.number || jid.split("@")[0] });
 

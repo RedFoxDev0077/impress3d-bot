@@ -71,6 +71,7 @@ export async function listConversations() {
         country: conv.meta?.country || "",
         handoff: Boolean(conv.meta?.handoff),
         paused: Boolean(conv.meta?.paused),
+        pausedUntil: conv.meta?.pausedUntil || 0,
         quote: Boolean(conv.meta?.quote),
         labels: conv.meta?.labels || [],
         lastMessage: last?.content || "",
@@ -92,10 +93,29 @@ export async function getMessages(id, limit = 200) {
     country: conv.meta?.country || "",
     handoff: Boolean(conv.meta?.handoff),
     paused: Boolean(conv.meta?.paused),
+    pausedUntil: conv.meta?.pausedUntil || 0,
     quote: Boolean(conv.meta?.quote),
     labels: conv.meta?.labels || [],
     messages: conv.messages.slice(-limit),
   };
+}
+
+// ---- App settings (deploy-safe, gitignored) ----
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const DEFAULT_SETTINGS = { autoPauseMinutes: 60 };
+let settingsCache = null;
+export async function getSettings() {
+  if (settingsCache) return settingsCache;
+  try { settingsCache = { ...DEFAULT_SETTINGS, ...JSON.parse(await fs.readFile(SETTINGS_FILE, "utf-8")) }; }
+  catch { settingsCache = { ...DEFAULT_SETTINGS }; }
+  return settingsCache;
+}
+export async function setSettings(patch) {
+  const cur = await getSettings();
+  settingsCache = { ...cur, ...patch };
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(settingsCache, null, 2), "utf-8");
+  return settingsCache;
 }
 
 // Replace the label set for a conversation.
