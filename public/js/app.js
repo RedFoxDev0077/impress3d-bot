@@ -638,6 +638,10 @@ async function pageConfig(v) {
         <div class="kv"><span class="k">Instância</span><span class="v">${conn.instance || "-"}</span></div>
         <div class="kv"><span class="k">Estado</span><span class="v">${conn.state === "open" ? "🟢 Conectado" : "🔴 Desconectado"}</span></div>
         <a href="#/conexao" class="btn btn-primary block" style="margin-top:14px">${ico("qr", "icon icon-sm")} Gerir ligação</a>
+        <div class="divider"></div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:10px">${ico("tag", "icon icon-sm")} Traz as etiquetas do WhatsApp Business para o painel. As novas etiquetas sincronizam sozinhas; use o botão para trazer as já existentes.</div>
+        <button class="btn block" id="syncLabels">${ico("refresh", "icon icon-sm")} Sincronizar etiquetas do WhatsApp</button>
+        <span class="prompt-status" id="syncLabelsStatus"></span>
       </div>
       <div class="card">
         <div class="card-head"><div>${ico("settings")}</div><h3>Conta</h3></div>
@@ -679,6 +683,17 @@ async function pageConfig(v) {
   loadPrompt();
 
   // ---- Auto-pause timer setting ----
+  $("#syncLabels").addEventListener("click", async () => {
+    const btn = $("#syncLabels"), st = $("#syncLabelsStatus");
+    btn.disabled = true; btn.innerHTML = `${ico("refresh", "icon icon-sm spin")} A sincronizar…`; st.textContent = "";
+    try {
+      const r = await api("/api/labels/sync", { method: "POST" });
+      const total = (r.instances || []).reduce((a, i) => a + (i.labels || 0), 0);
+      st.textContent = `✅ ${total} etiquetas ligadas — a trazer as conversas…`;
+      toast("Sincronização iniciada");
+    } catch { st.textContent = "❌ Erro ao sincronizar"; }
+    finally { btn.disabled = false; btn.innerHTML = `${ico("refresh", "icon icon-sm")} Sincronizar etiquetas do WhatsApp`; }
+  });
   const apInput = $("#autoPauseMin"), apStatus = $("#autoPauseStatus");
   try { const s = await api("/api/settings"); apInput.value = s.autoPauseMinutes ?? 60; } catch {}
   $("#autoPauseSave").addEventListener("click", async () => {

@@ -11,6 +11,7 @@ import {
   setMeta,
   setLabels,
   deleteConversation,
+  findConversationId,
   listConversations,
   getMessages,
   getStats,
@@ -402,6 +403,52 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   scheduleReply(jid, instance, country);
 }
 
+// ---- WhatsApp Business label sync (labels set in WhatsApp appear in the panel) ----
+const labelNames = new Map(); // instance -> Map(labelId -> name)
+const SYSTEM_LABELS = new Set(["groups", "grupos", "communities", "comunidades", "favorites", "favoritos", "no lidas", "não lidas", "nao lidas", "unread", "broadcast"]);
+const isSystemLabel = (name) => SYSTEM_LABELS.has(String(name || "").trim().toLowerCase());
+
+async function refreshLabelNames(instance) {
+  const labels = await evolution.findLabels(instance);
+  const m = new Map();
+  for (const l of labels) m.set(String(l.labelId ?? l.id), l.name);
+  labelNames.set(instance, m);
+  return m;
+}
+
+// Apply a labels.association event (label added/removed on a chat in WhatsApp).
+async function handleLabelAssociation(body) {
+  const instance = body.instance || evolution.meta.DEFAULT_INSTANCE;
+  const d = body.data || {};
+  const assoc = d.association || d.labelAssociation || d;
+  const chatId = assoc.chatId || assoc.chatJid || assoc.remoteJid || d.chatId;
+  const labelId = String(assoc.labelId ?? d.labelId ?? "");
+  const type = String(d.type || assoc.type || "add").toLowerCase(); // add | remove | deleted
+  if (!chatId || !labelId) return;
+  let names = labelNames.get(instance);
+  if (!names || !names.has(labelId)) names = await refreshLabelNames(instance);
+  const name = names.get(labelId);
+  if (!name || isSystemLabel(name)) return;
+  const convId = await findConversationId(chatId);
+  if (!convId) return; // only conversations we already have
+  const conv = await getConversation(convId);
+  const set = new Set(conv.meta?.labels || []);
+  if (type.startsWith("remove") || type.startsWith("delete")) set.delete(name); else set.add(name);
+  await setLabels(convId, [...set]);
+  console.log(`[label-sync:${instance}] ${type} "${name}" -> ${convId}`);
+}
+
+// Manual sync: refresh label names + reconnect each number to backfill existing associations.
+app.post("/api/labels/sync", requireAuth, async (_req, res) => {
+  const out = [];
+  for (const i of evolution.getInstances()) {
+    const m = await refreshLabelNames(i.id);
+    await evolution.restartInstance(i.id);
+    out.push({ instance: i.id, labels: m.size });
+  }
+  res.json({ ok: true, instances: out });
+});
+
 // A message the human agent sent directly from the phone → show it in the panel as "atendente".
 async function storeOutgoing({ instance, jid, text, hasText, mediaType, raw, ext, fileName }) {
   instance = instance || evolution.meta.DEFAULT_INSTANCE;
@@ -431,6 +478,9 @@ async function storeOutgoing({ instance, jid, text, hasText, mediaType, raw, ext
 app.post("/webhook/evolution", async (req, res) => {
   res.sendStatus(200); // ack fast
   try {
+    const ev = String(req.body?.event || req.body?.type || "").toLowerCase().replace(/_/g, ".");
+    if (ev.includes("labels.association")) return void handleLabelAssociation(req.body).catch((e) => console.error("[label-assoc]", e.message));
+    if (ev.includes("labels.edit")) return void refreshLabelNames(req.body.instance).catch(() => {});
     const parsed = evolution.parseIncoming(req.body);
     if (parsed && !seenId(parsed.id)) {
       if (parsed.fromMe) await storeOutgoing(parsed);
@@ -489,6 +539,9 @@ app.listen(PORT, "127.0.0.1", () => {
   if (WA_PROVIDER === "evolution") {
     for (const i of evolution.getInstances()) {
       evolution.ensureInstance(i.id, WEBHOOK_URL).catch(() => {});
+      refreshLabelNames(i.id).catch(() => {});
     }
+    // Periodically refresh the label name map so renamed/new labels stay current.
+    setInterval(() => { for (const i of evolution.getInstances()) refreshLabelNames(i.id).catch(() => {}); }, 10 * 60 * 1000);
   }
 });

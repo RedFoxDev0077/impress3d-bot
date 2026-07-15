@@ -118,6 +118,17 @@ export async function setSettings(patch) {
   return settingsCache;
 }
 
+// Find our conversation id for a WhatsApp chat id (matches exact jid or bare number).
+export async function findConversationId(chatId) {
+  const db = await load();
+  if (db[chatId]) return chatId;
+  const num = String(chatId).split("@")[0].split(":")[0];
+  for (const [id, conv] of Object.entries(db)) {
+    if (id.split("@")[0].split(":")[0] === num || conv.meta?.number === num) return id;
+  }
+  return null;
+}
+
 // Delete a conversation entirely; returns its media filenames so they can be removed.
 export async function deleteConversation(id) {
   const db = await load();

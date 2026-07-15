@@ -40,10 +40,11 @@ export async function ensureInstance(instance, webhookUrl) {
   if (webhookUrl) await setWebhook(instance, webhookUrl);
 }
 
+const WH_EVENTS = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "LABELS_ASSOCIATION", "LABELS_EDIT"];
 export async function setWebhook(instance, url) {
   const payloads = [
-    { webhook: { enabled: true, url, byEvents: false, base64: false, events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"] } },
-    { url, webhook_by_events: false, events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE"] },
+    { webhook: { enabled: true, url, byEvents: false, base64: false, events: WH_EVENTS } },
+    { url, webhook_by_events: false, events: WH_EVENTS },
   ];
   for (const body of payloads) {
     try { await api.post(`/webhook/set/${instance}`, body); return true; } catch {}
@@ -102,6 +103,27 @@ export async function sendMedia(instance, to, { url, base64, type = "image", mim
   if (fileName) body.fileName = fileName;
   const res = await api.post(`/message/sendMedia/${instance}`, body);
   return res.data;
+}
+
+// WhatsApp Business labels (definitions: id, name, color).
+export async function findLabels(instance) {
+  try {
+    const r = await api.get(`/label/findLabels/${instance}`);
+    const d = r.data;
+    return Array.isArray(d) ? d : d?.labels || d?.data || [];
+  } catch (e) {
+    console.warn("[evolution] findLabels:", e.response?.status || e.message);
+    return [];
+  }
+}
+
+// Reconnect the instance (keeps the session — no QR) to re-sync app state,
+// which makes WhatsApp re-emit the existing label associations.
+export async function restartInstance(instance) {
+  for (const m of ["post", "put"]) {
+    try { await api[m](`/instance/restart/${instance}`); return true; } catch {}
+  }
+  return false;
 }
 
 // Fetch decrypted media (base64) for a media message.
