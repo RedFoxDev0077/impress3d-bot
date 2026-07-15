@@ -360,6 +360,7 @@ window.addEventListener("hashchange", () => { if (!location.hash.includes("conex
 let convPoll = null, convOpenId = null, convSig = "";
 let convFilter = { kind: "all", value: "" };
 let convScope = ""; // "pt" | "br" — the country page currently open
+let convSearch = ""; // conversation search query
 const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
 function pauseLabel(c) {
   if (c.paused) return "IA pausada";
@@ -368,6 +369,10 @@ function pauseLabel(c) {
 }
 function applyConvFilter(chats) {
   let list = convScope ? chats.filter((c) => c.country === convScope) : chats;
+  if (convSearch) {
+    const q = convSearch.toLowerCase();
+    list = list.filter((c) => (c.name || "").toLowerCase().includes(q) || (c.number || "").includes(q) || (c.lastMessage || "").toLowerCase().includes(q));
+  }
   const f = convFilter;
   if (f.kind === "quote") return list.filter((c) => c.quote || (c.labels || []).includes("Orçamentos") || (c.labels || []).includes("Orçamento"));
   if (f.kind === "label") return list.filter((c) => (c.labels || []).includes(f.value));
@@ -390,14 +395,19 @@ function wireFilterBar() {
 async function pageConversas(v, country) {
   convScope = country || "";
   convFilter = { kind: "all", value: "" };
+  convSearch = "";
   convOpenId = null;
   v.innerHTML = `
     ${filterBarHtml()}
     <div class="chat-layout">
-      <div class="card chat-list" id="chatList" style="padding:8px"></div>
+      <div class="chat-col">
+        <div class="chat-search">${ico("search", "icon icon-sm")}<input id="convSearch" placeholder="Pesquisar contacto ou conversa…" autocomplete="off" /></div>
+        <div class="card chat-list" id="chatList" style="padding:8px"></div>
+      </div>
       <div class="card chat-panel" id="chatPanel"><div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div></div>
     </div>`;
   wireFilterBar();
+  $("#convSearch").addEventListener("input", (e) => { convSearch = e.target.value.trim(); loadList(false); });
   await loadList(true);
   if (convPoll) clearInterval(convPoll);
   convPoll = setInterval(pollConversas, 4000);

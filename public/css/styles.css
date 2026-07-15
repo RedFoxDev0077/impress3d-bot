@@ -371,3 +371,11 @@ svg { display: block; }
 /* composer attach button */
 .composer-attach { flex: 0 0 auto; cursor: pointer; }
 .chat-panel.drop-hi { outline: 2px dashed var(--brand); outline-offset: -6px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }
+
+/* conversation search */
+.chat-col { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.chat-col .chat-list { flex: 1; min-height: 0; }
+.chat-search { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border-2); color: var(--muted); box-shadow: var(--shadow-sm); }
+.chat-search:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12); }
+.chat-search input { border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13.5px; width: 100%; font-family: inherit; }
+.chat-search input::placeholder { color: var(--muted-2); }
