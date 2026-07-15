@@ -10,6 +10,7 @@ import {
   appendMessage,
   setMeta,
   setLabels,
+  deleteConversation,
   listConversations,
   getMessages,
   getStats,
@@ -72,7 +73,15 @@ app.use(express.json({ limit: "16mb", verify: (req, _res, buf) => (req.rawBody =
 
 // Provider-agnostic send (instance-aware for Evolution).
 async function sendText(instance, to, body) {
-  return WA_PROVIDER === "meta" ? meta.sendText(to, body) : evolution.sendText(instance, to, body);
+  const r = WA_PROVIDER === "meta" ? await meta.sendText(to, body) : await evolution.sendText(instance, to, body);
+  recordSent(r);
+  return r;
+}
+// Remember the ids of messages WE send, so their fromMe webhook echoes aren't
+// re-stored as if the agent had typed them on the phone.
+function recordSent(result) {
+  const id = result?.key?.id || result?.message?.key?.id;
+  if (id) seenIds.add(id);
 }
 
 // Detects file links in an outgoing message so they go out as NATIVE media,
@@ -93,7 +102,7 @@ async function sendSmart(instance, to, text) {
   for (const u of urls) caption = caption.replace(u, "").trim();
   let first = true;
   for (const u of urls) {
-    try { await evolution.sendMedia(instance, to, { url: u, type: urlMediaType(u), caption: first ? caption : "" }); first = false; }
+    try { recordSent(await evolution.sendMedia(instance, to, { url: u, type: urlMediaType(u), caption: first ? caption : "" })); first = false; }
     catch (e) { console.warn("[sendMedia] fallback to text:", e.response?.data || e.message); await sendText(instance, to, u); }
   }
   return { ok: true };
@@ -140,6 +149,14 @@ app.post("/api/chats/:id/labels", requireAuth, async (req, res) => {
   res.json({ ok: true, labels });
 });
 
+// Delete a conversation from the system and the server (removes its media too).
+app.delete("/api/chats/:id", requireAuth, async (req, res) => {
+  const id = decodeURIComponent(req.params.id);
+  const media = await deleteConversation(id);
+  for (const f of media) { try { await fsp.unlink(path.join(MEDIA_DIR, path.basename(f))); } catch {} }
+  res.json({ ok: true });
+});
+
 // Send a manual message as the business (from the dashboard).
 app.post("/api/chats/:id/send", requireAuth, async (req, res) => {
   const id = decodeURIComponent(req.params.id);
@@ -166,7 +183,7 @@ app.post("/api/chats/:id/send-media", requireAuth, async (req, res) => {
   try {
     const conv = await getConversation(id);
     const instance = conv.meta?.instance || evolution.meta.DEFAULT_INSTANCE;
-    await evolution.sendMedia(instance, id, { base64, url, type, mime, fileName, caption });
+    recordSent(await evolution.sendMedia(instance, id, { base64, url, type, mime, fileName, caption }));
     let mediaFile = null;
     if (base64) {
       const e = extFromMime(mime) || (type === "image" ? "jpg" : type === "audio" ? "ogg" : type === "video" ? "mp4" : "bin");
@@ -385,11 +402,40 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   scheduleReply(jid, instance, country);
 }
 
+// A message the human agent sent directly from the phone → show it in the panel as "atendente".
+async function storeOutgoing({ instance, jid, text, hasText, mediaType, raw, ext, fileName }) {
+  instance = instance || evolution.meta.DEFAULT_INSTANCE;
+  const country = evolution.countryOf(instance);
+  const conv = await getConversation(jid);
+  await setMeta(jid, { instance, country, number: conv.meta?.number || jid.split("@")[0] });
+  let extra = { agent: true };
+  if (mediaType) {
+    let mediaFile = null;
+    try {
+      const md = await evolution.getMediaBase64(instance, raw);
+      if (md?.base64) {
+        const e = extFromMime(md.mimetype) || ext || "bin";
+        mediaFile = `${Date.now()}_ph.${e}`;
+        await fsp.mkdir(MEDIA_DIR, { recursive: true });
+        await fsp.writeFile(path.join(MEDIA_DIR, mediaFile), Buffer.from(md.base64, "base64"));
+      }
+    } catch (e) { console.warn("[phone-out media] fetch failed:", e.message); }
+    extra = { agent: true, type: mediaType, media: mediaFile, fileName };
+  }
+  const label = { image: "📷 Imagem", audio: "🎤 Áudio", video: "🎬 Vídeo", sticker: "🃏 Figurinha", document: `📎 ${fileName || "Documento"}` }[mediaType] || "";
+  await appendMessage(jid, "assistant", hasText ? text : label, null, extra);
+  await autoPause(jid); // the human is handling this chat from the phone — mute the AI
+  console.log(`[phone-out:${instance}] ${jid}: ${String(hasText ? text : label).slice(0, 60)}`);
+}
+
 app.post("/webhook/evolution", async (req, res) => {
   res.sendStatus(200); // ack fast
   try {
     const parsed = evolution.parseIncoming(req.body);
-    if (parsed && !seenId(parsed.id)) await handleInbound(parsed);
+    if (parsed && !seenId(parsed.id)) {
+      if (parsed.fromMe) await storeOutgoing(parsed);
+      else await handleInbound(parsed);
+    }
   } catch (e) {
     console.error("[webhook/evolution] error:", e);
   }

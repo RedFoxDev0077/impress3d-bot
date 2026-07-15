@@ -117,7 +117,6 @@ export function parseIncoming(body) {
   const data = Array.isArray(body?.data) ? body.data[0] : body?.data;
   if (!data) return null;
   const key = data.key || {};
-  if (key.fromMe) return null;
   const jid = key.remoteJid || "";
   if (jid.endsWith("@g.us") || jid.includes("broadcast")) return null;
   const m = data.message || {};
@@ -135,6 +134,7 @@ export function parseIncoming(body) {
   return {
     instance: body.instance || DEFAULT_INSTANCE,
     jid,
+    fromMe: Boolean(key.fromMe),
     number: jidToNumber(jid),
     name: data.pushName || "",
     text: (text || "").trim(),

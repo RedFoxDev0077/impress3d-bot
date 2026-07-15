@@ -20,6 +20,7 @@ const P = {
   refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.5 15"/>',
   power: '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>',
   send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   paperclip: '<path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
   bot: '<rect x="3" y="8" width="18" height="12" rx="3"/><path d="M12 8V4M8 3h8"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>',
   clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>',
@@ -468,6 +469,7 @@ async function openChat(id) {
         <input type="checkbox" id="pauseChk" ${c.paused || (c.pausedUntil > Date.now()) ? "checked" : ""}/>
         <span class="pause-label">${pauseLabel(c)}</span>
       </label>
+      <button class="icon-btn" id="delChat" title="Apagar conversa" style="margin-left:8px">${ico("trash", "icon icon-sm")}</button>
     </div>
     <div class="chat-labels" id="chatLabels">${chatLabelsHtml(c.labels || [], c.country)}</div>
     <div class="chat-thread" id="thread">${threadHtml(c) || `<div class="empty-state">${ico("chat")}<div>Sem mensagens</div></div>`}</div>
@@ -482,6 +484,15 @@ async function openChat(id) {
     $(".pause-label").textContent = paused ? "IA pausada" : "IA ativa";
     try { await api(`/api/chats/${encodeURIComponent(id)}/pause`, { method: "POST", body: JSON.stringify({ paused }) }); toast(paused ? "IA pausada nesta conversa" : "IA reativada"); loadList(false); }
     catch { toast("Erro ao alterar"); e.target.checked = !paused; }
+  });
+  $("#delChat").addEventListener("click", async () => {
+    if (!confirm("Apagar esta conversa? Remove-a do sistema e do servidor. (Não apaga nada no WhatsApp do cliente.)")) return;
+    try {
+      await api(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+      convOpenId = null; convSig = "";
+      $("#chatPanel").innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Conversa apagada</div></div>`;
+      toast("Conversa apagada"); loadList(false);
+    } catch { toast("Erro ao apagar"); }
   });
   $("#composer").addEventListener("submit", async (e) => {
     e.preventDefault();

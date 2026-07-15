@@ -118,6 +118,17 @@ export async function setSettings(patch) {
   return settingsCache;
 }
 
+// Delete a conversation entirely; returns its media filenames so they can be removed.
+export async function deleteConversation(id) {
+  const db = await load();
+  const conv = db[id];
+  if (!conv) return [];
+  const media = (conv.messages || []).map((m) => m.media).filter(Boolean);
+  delete db[id];
+  await persist();
+  return media;
+}
+
 // Replace the label set for a conversation.
 export async function setLabels(id, labels) {
   const clean = Array.from(new Set((labels || []).map((l) => String(l).trim()).filter(Boolean))).slice(0, 12);
