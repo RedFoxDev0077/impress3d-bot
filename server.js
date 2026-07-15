@@ -246,6 +246,30 @@ app.post("/api/connection/logout", requireAuth, async (req, res) => {
 });
 
 // ---------- WhatsApp: Evolution webhook ----------
+// De-dup webhook retries by message id (WhatsApp/Evolution can resend the same message).
+const seenIds = new Set();
+function seenId(id) { if (!id) return false; if (seenIds.has(id)) return true; seenIds.add(id); if (seenIds.size > 8000) seenIds.clear(); return false; }
+
+// Debounce a burst (e.g. 5 photos sent one-by-one) into ONE AI reply.
+const DEBOUNCE_MS = parseInt(process.env.AI_DEBOUNCE_MS || "7000", 10);
+const pending = new Map(); // jid -> { timer, instance, country, images: [] }
+function scheduleReply(jid, instance, country, image) {
+  const p = pending.get(jid) || { images: [] };
+  p.instance = instance; p.country = country;
+  if (image) p.images.push(image);
+  if (p.timer) clearTimeout(p.timer);
+  p.timer = setTimeout(() => runPending(jid).catch((e) => console.error("[pending]", e)), DEBOUNCE_MS);
+  pending.set(jid, p);
+}
+async function runPending(jid) {
+  const p = pending.get(jid); if (!p) return;
+  pending.delete(jid);
+  const conv = await getConversation(jid);
+  if (isPaused(conv.meta)) return; // an agent took over while we waited
+  const images = p.images.slice(0, 4);
+  await aiReplyAndSend(p.instance, jid, p.country, images.length ? { images } : {});
+}
+
 // Generate an AI reply from the conversation history and send it on the right number.
 async function aiReplyAndSend(instance, jid, country, opts = {}) {
   const history = await getHistory(jid);
@@ -313,20 +337,20 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
       // A file usually means a quote — tag it and let the AI validate the format on the spot.
       const labels = new Set(conv.meta?.labels || []); labels.add("Orçamentos");
       await setMeta(jid, { quote: true, labels: [...labels] });
-      await aiReplyAndSend(instance, jid, country);
+      scheduleReply(jid, instance, country);
       return;
     }
 
-    // Vision — the AI actually looks at the customer's photo of the part.
+    // Vision — the AI actually looks at the customer's photo of the part (grouped if a burst).
     if ((mediaType === "image" || mediaType === "sticker") && mediaB64 && hasAI && mediaB64.length < 4_500_000) {
-      console.log(`[vision] analysing image for ${jid} (${Math.round(mediaB64.length / 1024)} KB b64)`);
-      await aiReplyAndSend(instance, jid, country, { image: { base64: mediaB64, mime: visionMime(mediaMime) } });
+      console.log(`[vision] queued image for ${jid} (${Math.round(mediaB64.length / 1024)} KB b64)`);
+      scheduleReply(jid, instance, country, { base64: mediaB64, mime: visionMime(mediaMime) });
       return;
     }
 
     // Audio with a transcript → let the AI answer the spoken question.
     if (mediaType === "audio" && transcript && hasAI) {
-      await aiReplyAndSend(instance, jid, country);
+      scheduleReply(jid, instance, country);
       return;
     }
 
@@ -358,14 +382,14 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
   }
 
   if (paused) return; // manual takeover — an agent replies from the dashboard
-  await aiReplyAndSend(instance, jid, country);
+  scheduleReply(jid, instance, country);
 }
 
 app.post("/webhook/evolution", async (req, res) => {
   res.sendStatus(200); // ack fast
   try {
     const parsed = evolution.parseIncoming(req.body);
-    if (parsed) await handleInbound(parsed);
+    if (parsed && !seenId(parsed.id)) await handleInbound(parsed);
   } catch (e) {
     console.error("[webhook/evolution] error:", e);
   }

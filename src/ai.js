@@ -83,17 +83,20 @@ export function visionMime(m) {
   return VISION_MIMES.has(t) ? t : "image/jpeg";
 }
 
-// Attach the image to the most recent user turn, in the provider's format.
-function attachImage(history, image, provider) {
+// Attach one or more images to the most recent user turn, in the provider's format.
+function attachImages(history, images, provider) {
   const msgs = history.map((m) => ({ ...m }));
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== "user") continue;
     const text = typeof msgs[i].content === "string" ? msgs[i].content : "";
-    const prompt = text || "O cliente enviou esta imagem. Analise-a e responda.";
-    msgs[i] =
+    const prompt = text || (images.length > 1 ? "O cliente enviou estas imagens. Analise-as e responda." : "O cliente enviou esta imagem. Analise-a e responda.");
+    const blocks = images.map((img) =>
       provider === "openai"
-        ? { role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } }] }
-        : { role: "user", content: [{ type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } }, { type: "text", text: prompt }] };
+        ? { type: "image_url", image_url: { url: `data:${img.mime};base64,${img.base64}` } }
+        : { type: "image", source: { type: "base64", media_type: img.mime, data: img.base64 } });
+    msgs[i] = provider === "openai"
+      ? { role: "user", content: [{ type: "text", text: prompt }, ...blocks] }
+      : { role: "user", content: [...blocks, { type: "text", text: prompt }] };
     break;
   }
   return msgs;
@@ -123,6 +126,7 @@ export async function transcribeAudio(base64, mime = "audio/ogg") {
 // opts.image = { base64, mime } attaches a photo for vision analysis.
 export async function generateReply(history, opts = {}) {
   const system = opts.system || (await systemPrompt(opts.country));
-  const msgs = opts.image?.base64 ? attachImage(history, opts.image, PROVIDER) : history;
+  const images = (opts.images || (opts.image ? [opts.image] : [])).filter((i) => i?.base64);
+  const msgs = images.length ? attachImages(history, images, PROVIDER) : history;
   return PROVIDER === "openai" ? callOpenAI(msgs, system) : callAnthropic(msgs, system);
 }
