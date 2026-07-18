@@ -334,7 +334,7 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
     }
     // Audio → Whisper transcription (when an OpenAI key is set).
     let transcript = "";
-    if (mediaType === "audio" && mediaB64 && process.env.OPENAI_API_KEY) {
+    if (mediaType === "audio" && mediaB64 && process.env.OPENAI_API_KEY && !paused) {
       try { transcript = await transcribeAudio(mediaB64, mediaMime || "audio/ogg"); console.log(`[whisper] ${jid}: "${transcript.slice(0, 80)}"`); }
       catch (e) { console.warn("[whisper] failed:", e.message); }
     }
@@ -360,7 +360,7 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
     }
 
     // Vision — the AI actually looks at the customer's photo of the part (grouped if a burst).
-    if ((mediaType === "image" || mediaType === "sticker") && mediaB64 && hasAI && mediaB64.length < 4_500_000) {
+    if (mediaType === "image" && mediaB64 && hasAI && mediaB64.length < 4_500_000) {
       console.log(`[vision] queued image for ${jid} (${Math.round(mediaB64.length / 1024)} KB b64)`);
       scheduleReply(jid, instance, country, { base64: mediaB64, mime: visionMime(mediaMime) });
       return;
@@ -371,6 +371,9 @@ async function handleInbound({ instance, jid, name, text, hasText, id, mediaType
       scheduleReply(jid, instance, country);
       return;
     }
+
+    // Video and stickers can't be read by the AI — store only, no auto-reply (saves tokens).
+    if (mediaType === "video" || mediaType === "sticker") return;
 
     const reply = mediaAck(mediaType);
     await appendMessage(jid, "assistant", reply);
@@ -483,6 +486,9 @@ app.post("/webhook/evolution", async (req, res) => {
     if (ev.includes("labels.edit")) return void refreshLabelNames(req.body.instance).catch(() => {});
     const parsed = evolution.parseIncoming(req.body);
     if (parsed && !seenId(parsed.id)) {
+      // Ignore old messages re-delivered by a history/app-state resync (was spamming chats).
+      const stale = parsed.messageTs && Date.now() / 1000 - parsed.messageTs > 180;
+      if (stale) return;
       if (parsed.fromMe) await storeOutgoing(parsed);
       else await handleInbound(parsed);
     }

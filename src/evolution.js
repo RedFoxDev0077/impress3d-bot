@@ -141,10 +141,12 @@ export function parseIncoming(body) {
   const key = data.key || {};
   const jid = key.remoteJid || "";
   if (jid.endsWith("@g.us") || jid.includes("broadcast")) return null;
-  const m = data.message || {};
+  let m = data.message || {};
+  // Unwrap disappearing / view-once wrappers to reach the real content.
+  m = m.ephemeralMessage?.message || m.viewOnceMessage?.message || m.viewOnceMessageV2?.message || m.viewOnceMessageV2Extension?.message || m;
   // WhatsApp wraps a captioned document in documentWithCaptionMessage.
   const doc = m.documentMessage || m.documentWithCaptionMessage?.message?.documentMessage;
-  const text = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || doc?.caption || m.documentWithCaptionMessage?.message?.documentMessage?.caption || "";
+  const text = m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || doc?.caption || "";
 
   let mediaType = null, mime = "", ext = "", fileName = "";
   if (m.imageMessage) { mediaType = "image"; mime = m.imageMessage.mimetype || "image/jpeg"; ext = "jpg"; }
@@ -153,6 +155,14 @@ export function parseIncoming(body) {
   else if (m.stickerMessage) { mediaType = "sticker"; mime = "image/webp"; ext = "webp"; }
   else if (doc) { mediaType = "document"; mime = doc.mimetype || "application/octet-stream"; fileName = doc.fileName || ""; ext = (fileName || "file").split(".").pop().toLowerCase() || "bin"; }
 
+  const hasText = Boolean((text || "").trim());
+  // Ignore events with no text and no media — reactions, receipts, protocol/system
+  // messages, poll updates, history-sync stubs. Replying to these spammed users.
+  if (!hasText && !mediaType) return null;
+
+  const tsRaw = data.messageTimestamp;
+  const messageTs = typeof tsRaw === "number" ? tsRaw : Number(tsRaw?.low ?? tsRaw ?? 0);
+
   return {
     instance: body.instance || DEFAULT_INSTANCE,
     jid,
@@ -160,8 +170,9 @@ export function parseIncoming(body) {
     number: jidToNumber(jid),
     name: data.pushName || "",
     text: (text || "").trim(),
-    hasText: Boolean((text || "").trim()),
+    hasText,
     mediaType, mime, ext, fileName,
+    messageTs,
     raw: data,
     id: key.id || "",
   };
