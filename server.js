@@ -324,6 +324,7 @@ async function runPending(jid) {
   const p = pending.get(jid); if (!p) return;
   pending.delete(jid);
   const conv = await getConversation(jid);
+  if (!conv.messages?.length) return; // conversation was deleted while we waited — don't resurrect it
   if (isPaused(conv.meta)) return; // an agent took over while we waited
   const images = p.images.slice(0, 4);
   await aiReplyAndSend(p.instance, jid, p.country, images.length ? { images } : {});
