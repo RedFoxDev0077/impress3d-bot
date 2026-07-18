@@ -83,7 +83,7 @@ async function api(pathname, opts = {}) {
     ...opts,
     headers: { "content-type": "application/json", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}), ...(opts.headers || {}) },
   });
-  if (res.status === 401) { logout(); throw new Error("unauthorized"); }
+  if (res.status === 401 && TOKEN) { logout(); throw new Error("unauthorized"); }
   const ct = res.headers.get("content-type") || "";
   const data = ct.includes("json") ? await res.json() : await res.text();
   if (!res.ok) throw Object.assign(new Error(data.error || "erro"), { data });
@@ -119,16 +119,24 @@ function renderLogin() {
       <p>Painel de Atendimento · WhatsApp IA</p>
       <div class="field"><label>Senha de acesso</label>
         <input class="input" type="password" id="pw" placeholder="••••••••" autocomplete="current-password" autofocus /></div>
+      <div class="field" id="codeField" style="display:none"><label>Código de verificação (2FA)</label>
+        <input class="input" id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" /></div>
       <button class="btn btn-primary block" type="submit">Entrar</button>
     </form>`;
   document.body.appendChild(wrap);
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = e.submitter; btn.disabled = true; btn.textContent = "A entrar…";
+    const body = { password: $("#pw").value };
+    if ($("#codeField").style.display !== "none") body.code = $("#code").value.trim();
     try {
-      const { token } = await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("#pw").value }) });
+      const { token } = await api("/api/login", { method: "POST", body: JSON.stringify(body) });
       TOKEN = token; localStorage.setItem(TOKEN_KEY, token); location.hash = "#/"; renderApp();
-    } catch (err) { toast(err.data?.error || "Senha incorreta"); btn.disabled = false; btn.textContent = "Entrar"; }
+    } catch (err) {
+      if (err.data?.needs2fa) { $("#codeField").style.display = "block"; $("#code").focus(); toast(err.data?.error || "Introduza o código de verificação"); }
+      else toast(err.data?.error || "Senha incorreta");
+      btn.disabled = false; btn.textContent = "Entrar";
+    }
   });
 }
 
@@ -361,6 +369,8 @@ let convPoll = null, convOpenId = null, convSig = "";
 let convFilter = { kind: "all", value: "" };
 let convScope = ""; // "pt" | "br" — the country page currently open
 let convSearch = ""; // conversation search query
+let selectMode = false; // bulk-select conversations for deletion
+const selectedIds = new Set();
 const flagOf = (country) => ({ pt: "🇵🇹", br: "🇧🇷" }[country] || "");
 function pauseLabel(c) {
   if (c.paused) return "IA pausada";
@@ -402,12 +412,34 @@ async function pageConversas(v, country) {
     <div class="chat-layout">
       <div class="chat-col">
         <div class="chat-search">${ico("search", "icon icon-sm")}<input id="convSearch" placeholder="Pesquisar contacto ou conversa…" autocomplete="off" /></div>
+        <div class="list-toolbar">
+          <button class="btn btn-ghost list-tbtn" id="selToggle">${ico("check", "icon icon-sm")} Selecionar</button>
+          <span id="selBar" style="display:none;align-items:center;gap:8px;margin-left:auto">
+            <span class="muted" style="font-size:12px"><b id="selCount">0 selec.</b></span>
+            <button class="btn btn-danger list-tbtn" id="selDelete">${ico("trash", "icon icon-sm")} Apagar</button>
+            <button class="btn btn-ghost list-tbtn" id="selCancel">Cancelar</button>
+          </span>
+        </div>
         <div class="card chat-list" id="chatList" style="padding:8px"></div>
       </div>
       <div class="card chat-panel" id="chatPanel"><div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div></div>
     </div>`;
   wireFilterBar();
   $("#convSearch").addEventListener("input", (e) => { convSearch = e.target.value.trim(); loadList(false); });
+  selectMode = false; selectedIds.clear();
+  const selToggle = $("#selToggle"), selBar = $("#selBar");
+  const exitSelect = () => { selectMode = false; selectedIds.clear(); selBar.style.display = "none"; selToggle.style.display = ""; loadList(false); };
+  selToggle.addEventListener("click", () => { selectMode = true; selToggle.style.display = "none"; selBar.style.display = "flex"; loadList(false); });
+  $("#selCancel").addEventListener("click", exitSelect);
+  $("#selDelete").addEventListener("click", async () => {
+    if (!selectedIds.size) { toast("Nada selecionado"); return; }
+    if (!confirm(`Apagar ${selectedIds.size} conversa(s)? Esta ação é permanente.`)) return;
+    const ids = [...selectedIds];
+    try { const r = await api("/api/chats/bulk-delete", { method: "POST", body: JSON.stringify({ ids }) }); toast(`${r.deleted} conversa(s) apagada(s)`); }
+    catch { toast("Erro ao apagar"); return; }
+    if (ids.includes(convOpenId)) { convOpenId = null; $("#chatPanel").innerHTML = `<div class="empty-state" style="margin:auto">${ico("chat")}<div>Selecione uma conversa</div></div>`; }
+    exitSelect();
+  });
   await loadList(true);
   if (convPoll) clearInterval(convPoll);
   convPoll = setInterval(pollConversas, 4000);
@@ -420,7 +452,9 @@ function chatItemHtml(c) {
     : c.handoff ? '<span class="badge warn" style="margin-top:4px;padding:2px 8px">humano</span>' : "";
   const flag = flagOf(c.country);
   const chips = (c.labels || []).slice(0, 3).map(labelChip).join("");
-  return `<div class="item${c.id === convOpenId ? " active" : ""}" data-id="${encodeURIComponent(c.id)}">
+  const cb = selectMode ? `<input type="checkbox" class="sel-chk" ${selectedIds.has(c.id) ? "checked" : ""} style="pointer-events:none"/>` : "";
+  return `<div class="item${c.id === convOpenId ? " active" : ""}${selectMode && selectedIds.has(c.id) ? " sel" : ""}" data-id="${encodeURIComponent(c.id)}">
+      ${cb}
       <div class="avatar" style="background:${avatarColor(c.name || c.number)}">${initials(c.name || c.number)}</div>
       <div style="min-width:0;flex:1">
         <div class="who">${flag ? `<span class="flag">${flag}</span> ` : ""}${escapeHtml(c.name || c.number)}</div>
@@ -448,8 +482,16 @@ async function loadList(autoOpen) {
     return;
   }
   list.innerHTML = filtered.map(chatItemHtml).join("");
-  list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", () => openChat(decodeURIComponent(it.dataset.id))));
-  if (autoOpen && !convOpenId) list.querySelector(".item")?.click();
+  list.querySelectorAll(".item").forEach((it) => it.addEventListener("click", () => {
+    const id = decodeURIComponent(it.dataset.id);
+    if (selectMode) {
+      selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+      it.classList.toggle("sel", selectedIds.has(id));
+      const cbx = it.querySelector(".sel-chk"); if (cbx) cbx.checked = selectedIds.has(id);
+      const cnt = $("#selCount"); if (cnt) cnt.textContent = `${selectedIds.size} selec.`;
+    } else openChat(id);
+  }));
+  if (autoOpen && !convOpenId && !selectMode) list.querySelector(".item")?.click();
 }
 function chatLabelsHtml(active, country) {
   return `<span class="labels-lead">${ico("tag", "icon icon-sm")}</span>` +
@@ -644,6 +686,10 @@ async function pageConfig(v) {
         <span class="prompt-status" id="syncLabelsStatus"></span>
       </div>
       <div class="card">
+        <div class="card-head"><div>${ico("lock")}</div><h3>Segurança · Login em 2 etapas</h3></div>
+        <div id="twofaBox"><div class="muted" style="font-size:12.5px">A carregar…</div></div>
+      </div>
+      <div class="card">
         <div class="card-head"><div>${ico("settings")}</div><h3>Conta</h3></div>
         <div class="muted" style="font-size:12.5px;margin-bottom:12px">Termine a sessão do painel administrativo com segurança.</div>
         <button class="btn btn-danger block" id="cfgLogout">${ico("logout", "icon icon-sm")} Terminar sessão</button>
@@ -656,6 +702,42 @@ async function pageConfig(v) {
       </div>
     </div>`;
   $("#cfgLogout").addEventListener("click", logout);
+
+  // ---- 2FA (TOTP) ----
+  const twofaBox = $("#twofaBox");
+  async function renderTwofa() {
+    let enabled = false;
+    try { enabled = (await api("/api/2fa")).enabled; } catch {}
+    if (enabled) {
+      twofaBox.innerHTML = `
+        <div class="kv"><span class="k">Estado</span><span class="v">🟢 Ativo</span></div>
+        <div class="muted" style="font-size:12.5px;margin:10px 0">Para desativar, confirme com um código do seu autenticador.</div>
+        <div class="row" style="gap:8px"><input class="input" id="twofaCode" inputmode="numeric" maxlength="6" placeholder="000000" style="max-width:130px"/>
+          <button class="btn btn-danger" id="twofaDisable">Desativar 2FA</button></div>`;
+      $("#twofaDisable").addEventListener("click", async () => {
+        try { await api("/api/2fa/disable", { method: "POST", body: JSON.stringify({ code: $("#twofaCode").value.trim() }) }); toast("2FA desativado"); renderTwofa(); }
+        catch (e) { toast(e.data?.error || "Código inválido"); }
+      });
+    } else {
+      twofaBox.innerHTML = `
+        <div class="muted" style="font-size:12.5px;margin-bottom:12px">Adicione uma camada extra de segurança: além da senha, será pedido um código do seu telemóvel (Google Authenticator / Authy).</div>
+        <button class="btn btn-primary" id="twofaStart">${ico("lock", "icon icon-sm")} Ativar 2FA</button>`;
+      $("#twofaStart").addEventListener("click", async () => {
+        let d; try { d = await api("/api/2fa/setup", { method: "POST" }); } catch { toast("Erro"); return; }
+        twofaBox.innerHTML = `
+          <div class="muted" style="font-size:12.5px;margin-bottom:8px">1) No app <b>Google Authenticator</b> (ou Authy), escolha <b>“Introduzir chave de configuração”</b> e cole esta chave:</div>
+          <div class="twofa-secret">${escapeHtml(d.secret)}</div>
+          <div class="muted" style="font-size:12.5px;margin:12px 0 8px">2) Introduza o código de 6 dígitos que aparece no app para confirmar:</div>
+          <div class="row" style="gap:8px"><input class="input" id="twofaConfirmCode" inputmode="numeric" maxlength="6" placeholder="000000" style="max-width:130px" autofocus/>
+            <button class="btn btn-primary" id="twofaConfirm">Confirmar e ativar</button></div>`;
+        $("#twofaConfirm").addEventListener("click", async () => {
+          try { await api("/api/2fa/enable", { method: "POST", body: JSON.stringify({ code: $("#twofaConfirmCode").value.trim() }) }); toast("2FA ativado ✅"); renderTwofa(); }
+          catch (e) { toast(e.data?.error || "Código inválido"); }
+        });
+      });
+    }
+  }
+  renderTwofa();
 
   // ---- Prompt editor ----
   let promptCountry = "pt";

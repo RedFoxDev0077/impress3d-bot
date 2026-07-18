@@ -368,6 +368,13 @@ svg { display: block; }
 .lbl-new-input::placeholder { color: var(--muted-2); font-weight: 500; }
 .lbl-new-input:focus { border-color: var(--brand); border-style: solid; box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.12); }
 
+/* bulk-select + 2FA */
+.list-toolbar { display: flex; align-items: center; gap: 8px; padding: 2px 4px 8px; }
+.list-tbtn { padding: 6px 10px; font-size: 12.5px; }
+.sel-chk { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--brand); }
+.item.sel { background: var(--brand-soft); }
+.twofa-secret { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; font-weight: 700; letter-spacing: 2px; background: var(--surface-2); border: 1px dashed var(--border-2); border-radius: 10px; padding: 12px; text-align: center; user-select: all; word-break: break-all; }
+
 /* composer attach button */
 .composer-attach { flex: 0 0 auto; cursor: pointer; }
 .chat-panel.drop-hi { outline: 2px dashed var(--brand); outline-offset: -6px; background: color-mix(in srgb, var(--brand) 5%, var(--surface)); }

@@ -118,6 +118,23 @@ export async function setSettings(patch) {
   return settingsCache;
 }
 
+// ---- Two-factor auth config (deploy-safe, gitignored; secret kept out of /api/settings) ----
+const TWOFA_FILE = path.join(DATA_DIR, "twofa.json");
+let twofaCache = null;
+export async function get2fa() {
+  if (twofaCache) return twofaCache;
+  try { twofaCache = JSON.parse(await fs.readFile(TWOFA_FILE, "utf-8")); }
+  catch { twofaCache = { enabled: false, secret: "", pending: "" }; }
+  return twofaCache;
+}
+export async function set2fa(patch) {
+  const cur = await get2fa();
+  twofaCache = { ...cur, ...patch };
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(TWOFA_FILE, JSON.stringify(twofaCache, null, 2), "utf-8");
+  return twofaCache;
+}
+
 // Find our conversation id for a WhatsApp chat id (matches exact jid or bare number).
 export async function findConversationId(chatId) {
   const db = await load();

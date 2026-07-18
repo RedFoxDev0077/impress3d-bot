@@ -17,7 +17,10 @@ import {
   getStats,
   getSettings,
   setSettings,
+  get2fa,
+  set2fa,
 } from "./src/store.js";
+import { generateSecret, verifyTotp, otpauthURL } from "./src/totp.js";
 import { generateReply, readPrompt, writePrompt, visionMime, transcribeAudio } from "./src/ai.js";
 import * as evolution from "./src/evolution.js";
 import * as meta from "./src/whatsapp.js";
@@ -121,10 +124,36 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: "unauthorized" });
 }
 
-app.post("/api/login", (req, res) => {
-  const { password } = req.body || {};
-  if (password && password === DASH_PASSWORD) return res.json({ token: issueToken() });
-  return res.status(401).json({ error: "senha incorreta" });
+app.post("/api/login", async (req, res) => {
+  const { password, code } = req.body || {};
+  if (!password || password !== DASH_PASSWORD) return res.status(401).json({ error: "senha incorreta" });
+  const tf = await get2fa();
+  if (tf.enabled) {
+    if (!code) return res.status(401).json({ error: "código de verificação necessário", needs2fa: true });
+    if (!verifyTotp(tf.secret, code)) return res.status(401).json({ error: "código de verificação inválido", needs2fa: true });
+  }
+  return res.json({ token: issueToken() });
+});
+
+// ---------- Two-factor authentication (TOTP) ----------
+app.get("/api/2fa", requireAuth, async (_req, res) => res.json({ enabled: Boolean((await get2fa()).enabled) }));
+app.post("/api/2fa/setup", requireAuth, async (_req, res) => {
+  const secret = generateSecret();
+  await set2fa({ pending: secret });
+  res.json({ secret, otpauth: otpauthURL(secret) });
+});
+app.post("/api/2fa/enable", requireAuth, async (req, res) => {
+  const secret = (await get2fa()).pending;
+  if (!secret) return res.status(400).json({ error: "gere o segredo primeiro" });
+  if (!verifyTotp(secret, req.body?.code)) return res.status(400).json({ error: "código inválido" });
+  await set2fa({ enabled: true, secret, pending: "" });
+  res.json({ ok: true, enabled: true });
+});
+app.post("/api/2fa/disable", requireAuth, async (req, res) => {
+  const tf = await get2fa();
+  if (tf.enabled && !verifyTotp(tf.secret, req.body?.code)) return res.status(400).json({ error: "código inválido" });
+  await set2fa({ enabled: false, secret: "", pending: "" });
+  res.json({ ok: true, enabled: false });
 });
 
 // ---------- Dashboard API ----------
@@ -156,6 +185,18 @@ app.delete("/api/chats/:id", requireAuth, async (req, res) => {
   const media = await deleteConversation(id);
   for (const f of media) { try { await fsp.unlink(path.join(MEDIA_DIR, path.basename(f))); } catch {} }
   res.json({ ok: true });
+});
+
+// Delete several conversations at once.
+app.post("/api/chats/bulk-delete", requireAuth, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  let deleted = 0;
+  for (const id of ids) {
+    const media = await deleteConversation(String(id));
+    for (const f of media) { try { await fsp.unlink(path.join(MEDIA_DIR, path.basename(f))); } catch {} }
+    deleted++;
+  }
+  res.json({ ok: true, deleted });
 });
 
 // Send a manual message as the business (from the dashboard).
