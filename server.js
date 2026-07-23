@@ -320,14 +320,27 @@ function scheduleReply(jid, instance, country, image) {
   p.timer = setTimeout(() => runPending(jid).catch((e) => console.error("[pending]", e)), DEBOUNCE_MS);
   pending.set(jid, p);
 }
+const generating = new Set(); // jids with an AI reply already in flight
 async function runPending(jid) {
   const p = pending.get(jid); if (!p) return;
+  // Never generate two replies for the same chat at once — the second would see a
+  // history ending with the first reply and be rejected ("must end with a user message").
+  if (generating.has(jid)) {
+    p.timer = setTimeout(() => runPending(jid).catch((e) => console.error("[pending]", e)), 3000);
+    pending.set(jid, p);
+    return;
+  }
   pending.delete(jid);
   const conv = await getConversation(jid);
   if (!conv.messages?.length) return; // conversation was deleted while we waited — don't resurrect it
   if (isPaused(conv.meta)) return; // an agent took over while we waited
-  const images = p.images.slice(0, 4);
-  await aiReplyAndSend(p.instance, jid, p.country, images.length ? { images } : {});
+  generating.add(jid);
+  try {
+    const images = p.images.slice(0, 4);
+    await aiReplyAndSend(p.instance, jid, p.country, images.length ? { images } : {});
+  } finally {
+    generating.delete(jid);
+  }
 }
 
 // Generate an AI reply from the conversation history and send it on the right number.

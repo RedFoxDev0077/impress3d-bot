@@ -124,9 +124,30 @@ export async function transcribeAudio(base64, mime = "audio/ogg") {
 // history: [{role:'user'|'assistant', content}] (most recent last).
 // opts.country selects the PT vs BR system prompt.
 // opts.image = { base64, mime } attaches a photo for vision analysis.
+// Make the history valid for the API: no empty blocks, alternating roles, and it
+// must start AND end with a user turn (otherwise Anthropic rejects the request).
+function normalizeHistory(history) {
+  const out = [];
+  for (const m of history || []) {
+    const role = m.role === "assistant" ? "assistant" : "user";
+    const content = typeof m.content === "string" ? m.content.trim() : m.content;
+    if (!content) continue; // empty content blocks are rejected
+    const last = out[out.length - 1];
+    if (last && last.role === role && typeof last.content === "string" && typeof content === "string") {
+      last.content += "\n" + content; // merge consecutive same-role turns
+    } else {
+      out.push({ role, content });
+    }
+  }
+  while (out.length && out[0].role !== "user") out.shift();
+  while (out.length && out[out.length - 1].role !== "user") out.pop();
+  return out.length ? out : [{ role: "user", content: "Olá" }];
+}
+
 export async function generateReply(history, opts = {}) {
   const system = opts.system || (await systemPrompt(opts.country));
   const images = (opts.images || (opts.image ? [opts.image] : [])).filter((i) => i?.base64);
-  const msgs = images.length ? attachImages(history, images, PROVIDER) : history;
+  const base = normalizeHistory(history);
+  const msgs = images.length ? attachImages(base, images, PROVIDER) : base;
   return PROVIDER === "openai" ? callOpenAI(msgs, system) : callAnthropic(msgs, system);
 }
